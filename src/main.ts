@@ -2,9 +2,13 @@
 import "./style.css";
 import { getSession, signIn, signOut, signUp } from "./repos/authRepo";
 import { supabase } from "./lib/supabaseClient";
-import { createMemo, getMemo, listMemos, updateMemo, type MemoRow } from "./repos/supabaseMemoRepo";
+import { createMemo, getMemo, listMemos, listDustMemos, updateMemo, type MemoRow } from "./repos/supabaseMemoRepo";
 
-type ViewMode = "editor" | "explorer";
+import memoUIHtml from "./templates/memoUI.html?raw";
+import mountAuthUIHtml from "./templates/mountAuthUI.html?raw";
+import resetPasswordUIHtml from "./templates/resetPasswordUI.html?raw";
+
+type ViewMode = "editor" | "explorer" | "dust";
 
 type TabState = {
   id: string;
@@ -18,14 +22,16 @@ type AppState = {
   tabs: TabState[];
   activeTabId: string;
   memos: MemoRow[];
+  explorerSortMode: 0 | 1 | 2 | 3;
 };
 
-const DEFAULT_TEXT = `# メモ
+const DEFAULT_TEXT = `# Shortcut List
 
-左に入力すると、右に即反映されます。
+1. ALT + SHIFT + CONTROL + 0 = Go To Explorer Tab
+2. ALT + SHIFT + CONTROL + S = Save a Memo
+3. ALT + SHIFT + CONTROL + T = Create a Memo
+4. ALT + SHIFT + CONTROL + O = Sort on Explorer Tab
 
-- Alt + Ctrl(Win) / ⌘(Mac) + S で保存（Create）
-- LIST で Explorer（一覧）
 `;
 
 const firstTabId = crypto.randomUUID();
@@ -37,7 +43,18 @@ const state: AppState = {
   ],
   activeTabId: firstTabId,
   memos: [],
+  explorerSortMode: 0,
 };
+
+function formatYmd(iso: string | null | undefined) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}/${m}/${day}`;
+}
 
 function activeTab(): TabState {
   const t = state.tabs.find((x) => x.id === state.activeTabId);
@@ -81,8 +98,8 @@ function extractFirstLineTitle(text: string, maxLen: number) {
 let saveShortcutRegistered = false;
 
 let goExplorerHandler: (() => Promise<void>) | null = null;
-
 let newTabHandler: (() => Promise<void>) | null = null;
+let sortExplorerHandler: (() => Promise<void>) | null = null;
 
 function isSaveShortcut(e: KeyboardEvent) {
   const keyRow = e.key;
@@ -93,6 +110,17 @@ function isSaveShortcut(e: KeyboardEvent) {
   // 代替案として下記一行を削除する
   const isMac = navigator.platform.toLowerCase().includes("mac");
   return e.altKey && (isMac ? e.metaKey : e.ctrlKey);
+}
+
+function isExplorerSortShortcut(e: KeyboardEvent) {
+  const keyRow = e.key;
+  if (typeof keyRow !== "string") return false;
+  if (keyRow.toLowerCase() !== "o") return false;
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasMod = isMac ? e.metaKey : e.ctrlKey;
+
+  return e.altKey && e.shiftKey && hasMod;
 }
 
 function isNewShortcut(e:KeyboardEvent) {
@@ -185,24 +213,17 @@ async function autoUpdateIfEditingCurrentMemo(): Promise<AutoUpdateResult> {
 
 
 async function saveIfDirty(): Promise<SaveResult> {
-  // if (!state.dirty) return "noop";
 
   const tab = activeTab();
   if (!tab.dirty) return "noop";
 
   const userId = await requireUserId();
 
-  // if (state.currentMemoId) {
-  //   await updateMemo({ userId, id: state.currentMemoId, content: state.text });
-  //   state.dirty = false;
-
   if (tab.currentMemoId) {
     await updateMemo({userId, id: tab.currentMemoId, content: tab.text});
     tab.dirty = false;
     return "updated";
   } else {
-    // const created = await createMemo({ userId, content: state.text });
-    // state.currentMemoId = created.id;
 
     const created = await createMemo({userId, content: tab.text});
     tab.currentMemoId = created.id;
@@ -230,6 +251,12 @@ function registerSaveShortcut() {
       return;
     }
 
+    if (isExplorerSortShortcut(e)) {
+      e.preventDefault();
+      if (sortExplorerHandler) void sortExplorerHandler();
+      return;
+    }
+
     if (isNewShortcut(e)) {
       e.preventDefault();
       if (newTabHandler) void newTabHandler();
@@ -249,77 +276,15 @@ function registerSaveShortcut() {
     } catch (err) {
       console.error("save failed", err);
       showMessage("Oops - save failed 😵‍💫", 2500);
-      setDirty(true);
+      // setDirty(true);
     }
   };
 
   window.addEventListener("keydown", handler, { passive: false });
 }
 
-// <div class="tablist" role="tablist" aria-label="Views">
-// <button id="editorTabBtn" class="tab is-active" type="button" role="tab" aria-selected="true">EDITOR</button>
-// </div>
-
 function mountMemoUI(app: HTMLDivElement) {
-  app.innerHTML = `
-    <div class="layout">
-      <header class="header">
-        <div class="topbar"> 
-          <div class="title">TypingNote</div>
-          <div class="sub">Editor / Explorer</div>
-          <button id="logoutBtn" class="btn" style="margin-left:auto;">Logout</button>
-        </div>
-        
-        <nav class="tabbar" aria-label="tabs">
-          <div class="tablist" id="tabList" role="tablist" aria-label="Tabs"></div>
-
-          <div class="tabbar-spacer" aria-hidden="true"></div>
-
-          <div class="tab-actions" aria-label="controls">
-            <button class="tab util" id="newTabBtn" type="button" aria-label="New Memo"> + </button>
-            <button class="tab util" id="openExplorerBtn" type="button" aria-label="Open Explorer">EXPLORER</button>
-          </div>
-        </nav>
-      </header>
-
-      <main class="panes">
-        <!-- Editor View -->
-        <section id="editorView" class="view">
-          <!--
-          <div style="display:flex; gap:8px; align-items:center; padding:8px 0;">
-            <button id="saveBtn" class="btn" type="button">Save</button>
-            <span id="saveState" style="font-size:12px; color:#666;"></span>
-          </div>
-          -->
-
-          <div id="msgBar" style="display:flex; gap:8px; align-items:center; padding:8px 0;">
-            <span id="msgText" style="font-size:12px; color:#666;"></span>
-          </div>
-
-          <div class="panes">
-            <section class="pane pane-left">
-              <div class="pane-header">Input</div>
-              <textarea id="memoInput" class="textarea" spellcheck="false"></textarea>
-            </section>
-
-            <section class="pane pane-right">
-              <div class="pane-header">Preview</div>
-              <div id="memoPreview" class="preview"></div>
-            </section>
-          </div>
-        </section>
-
-        <!-- Explorer View -->
-        <section id="explorerView" class="view" hidden>
-          <div style="display:flex; gap:8px; align-items:center; padding:8px 0;">
-            <button id="reloadBtn" class="btn" type="button">Reload</button>
-            <span id="listState" style="font-size:12px; color:#666;"></span>
-          </div>
-          <ul id="memoList" style="list-style:none; padding:0; margin:0;"></ul>
-        </section>
-      </main>
-    </div>
-  `;
+  app.innerHTML = memoUIHtml;
 
   // ---- elements
   const logoutBtn = qs<HTMLButtonElement>("#logoutBtn");
@@ -328,6 +293,12 @@ function mountMemoUI(app: HTMLDivElement) {
   const openExplorerBtn = qs<HTMLButtonElement>("#openExplorerBtn");
   const newTabBtn = qs<HTMLButtonElement>("#newTabBtn");
 
+  const openDustBtn = qs<HTMLButtonElement>("#openDustBtn");
+
+  const dustView = qs<HTMLElement>("#dustView");
+  const dustState = qs<HTMLSpanElement>("#dustState");
+  const dustList = qs<HTMLUListElement>("#dustList");  
+  
   const editorView = qs<HTMLElement>("#editorView");
   const explorerView = qs<HTMLElement>("#explorerView");
 
@@ -335,7 +306,7 @@ function mountMemoUI(app: HTMLDivElement) {
   const preview = qs<HTMLDivElement>("#memoPreview");
   const msgText = qs<HTMLSpanElement>("#msgText");
 
-  const reloadBtn = qs<HTMLButtonElement>("#reloadBtn");
+  // const reloadBtn = qs<HTMLButtonElement>("#reloadBtn");
   const listState = qs<HTMLSpanElement>("#listState");
   const memoList = qs<HTMLUListElement>("#memoList");
 
@@ -385,18 +356,35 @@ function mountMemoUI(app: HTMLDivElement) {
   });
   
   // ---- view helpers
+  // function setView(view: ViewMode) {
+  //   state.view = view;
+
+  //   const isEditor = view === "editor";
+  //   editorView.hidden = !isEditor;
+  //   explorerView.hidden = isEditor;
+
+  //   openExplorerBtn.classList.toggle("is-active", !isEditor);
+  //   openExplorerBtn.setAttribute("aria-pressed", String(!isEditor));
+  // }
+
   function setView(view: ViewMode) {
     state.view = view;
-
+  
     const isEditor = view === "editor";
+    const isExplorer = view === "explorer";
+    const isDust = view === "dust";
+  
     editorView.hidden = !isEditor;
-    explorerView.hidden = isEditor;
-
-    openExplorerBtn.classList.toggle("is-active", !isEditor);
-    openExplorerBtn.setAttribute("aria-pressed", String(!isEditor));
+    explorerView.hidden = !isExplorer;
+    dustView.hidden = !isDust;
+  
+    openExplorerBtn.classList.toggle("is-active", isExplorer);
+    openExplorerBtn.setAttribute("aria-pressed", String(isExplorer));
+  
+    openDustBtn.classList.toggle("is-active", isDust);
+    openDustBtn.setAttribute("aria-pressed", String(isDust));
   }
-
-
+  
   let msgTimer: number | undefined;
 
   function showMessage(text: string, ms = 1800) {
@@ -417,9 +405,6 @@ function mountMemoUI(app: HTMLDivElement) {
 
   // ---- renderers
   function renderEditor() {
-    // input.value = state.text;
-    // preview.innerHTML = renderPreviewText(state.text);
-    // if (state.dirty) msgText.textContent = "Unsaved";
 
     const tab = activeTab();
     input.value = tab.text;
@@ -437,12 +422,16 @@ function mountMemoUI(app: HTMLDivElement) {
       .map((m) => {
         const title = escapeHtml(memoTitleFromContent(m.content));
         const snippet = escapeHtml(memoSnippet(m.content));
-        const dt = new Date(m.created_at).toLocaleString();
+        const created = formatYmd(m.created_at);
+        const updated = m.updated_at ? formatYmd(m.updated_at) : created;
         return `
           <li style="border:1px solid #e3e6ea; border-radius:12px; padding:10px; margin-bottom:10px;">
             <button class="memo-row" data-id="${escapeHtml(m.id)}" type="button" style="all:unset; cursor:pointer; display:block; width:100%;">
               <div style="font-weight:700;">${title}</div>
-              <div style="font-size:12px; color:#666; margin-top:4px;">${dt}</div>
+              <div style="font-size:12px; color:#666; margin-top:6px;">
+                <div>Created Date: ${created}</div>
+                <div>Updated Date: ${updated}</div>
+              </div>
               <div style="font-size:12px; color:#333; margin-top:6px;">${snippet}</div>
             </button>
           </li>
@@ -451,18 +440,117 @@ function mountMemoUI(app: HTMLDivElement) {
       .join("");
   }
 
+  function renderDust(list: MemoRow[]) {
+    if (list.length === 0) {
+      dustList.innerHTML = `<li style="padding:10px; color:#666;">(empty)</li>`;
+      return;
+    }
+  
+    dustList.innerHTML = list
+      .map((m) => {
+        const title = escapeHtml(memoTitleFromContent(m.content));
+        const snippet = escapeHtml(memoSnippet(m.content));
+        const trashed = formatYmd(m.deleted_at);
+        return `
+          <li style="border:1px solid #e3e6ea; border-radius:12px; padding:10px; margin-bottom:10px;">
+            <button class="memo-row" data-id="${escapeHtml(m.id)}" type="button"
+              style="all:unset; cursor:pointer; display:block; width:100%;">
+              <div style="font-weight:700;">${title}</div>
+              <div style="font-size:12px; color:#666; margin-top:6px;">
+                <div>Trashed Date: ${trashed}</div>
+              </div>
+              <div style="font-size:12px; color:#333; margin-top:6px;">${snippet}</div>
+            </button>
+          </li>
+        `;
+      })
+      .join("");
+  }
+
+  // --- Explorer sort ---
+  const collEn = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+  const collJa = new Intl.Collator("ja", { numeric: true, sensitivity: "base" });
+
+  function titleOf(m: MemoRow) {
+    return memoTitleFromContent(m.content);
+  }
+
+  function isAsciiStart(s: string) {
+    return /^[A-Za-z0-9]/.test(s);
+  }
+
+  function getSortedExplorerList(list: MemoRow[]) {
+    const mode = state.explorerSortMode;
+
+    // mode=0 は「未選択」なので、サーバ既定（created_at desc）をそのまま
+    if (mode === 0) return list;
+
+    if (mode === 1) {
+      // 1) アルファベット順 → 五十音順（英数始まりを先に、その他を後に）
+      return [...list].sort((a, b) => {
+        const ta = titleOf(a);
+        const tb = titleOf(b);
+
+        const ga = isAsciiStart(ta) ? 0 : 1;
+        const gb = isAsciiStart(tb) ? 0 : 1;
+        if (ga !== gb) return ga - gb;
+
+        // グループ内の比較
+        return ga === 0 ? collEn.compare(ta, tb) : collJa.compare(ta, tb);
+      });
+    }
+
+    if (mode === 2) {
+      // 2) 更新日順（updated_at が無い/NULLなら created_at を使う）
+      return [...list].sort((a, b) => {
+        const da = Date.parse((a.updated_at ?? a.created_at) as string);
+        const db = Date.parse((b.updated_at ?? b.created_at) as string);
+        return db - da; // 新しい順
+      });
+    }
+
+    // 3) 作成順（新しい順）
+    return [...list].sort((a, b) => {
+      const da = Date.parse(a.created_at);
+      const db = Date.parse(b.created_at);
+      return db - da;
+    });
+  }
+
+  function sortLabel(mode: 0 | 1 | 2 | 3) {
+    if (mode === 1) return "Sort: Title (A→あ)";
+    if (mode === 2) return "Sort: Updated (newest)";
+    if (mode === 3) return "Sort: Created (newest)";
+    return "Sort: (not set)";
+  }
+
+
   async function loadExplorer() {
     try {
       listState.textContent = "Loading...";
       const userId = await requireUserId();
       const list = await listMemos({ userId, limit: 50 });
       state.memos = list;
-      renderExplorer(list);
+      renderExplorer(getSortedExplorerList(list));
       listState.textContent = `${list.length} memos`;
     } catch (e) {
       console.error(e);
       listState.textContent = "Failed to load";
       memoList.innerHTML = `<li style="padding:10px; color:#b00020;">Failed to load.</li>`;
+    }
+  }
+
+  async function loadDust() {
+    try {
+      dustState.textContent = "Loading...";
+      const userId = await requireUserId();
+      const list = await listDustMemos({ userId, limit: 50 });
+      renderDust(list);
+      dustState.textContent = `${list.length} trashed memos`;
+    } catch (e) {
+      console.error(e);
+      dustState.textContent = "Failed to load";
+      dustList.innerHTML = `<li style="padding:10px; color:#b00020;">Failed to load.</li>`;
     }
   }
 
@@ -478,11 +566,10 @@ function mountMemoUI(app: HTMLDivElement) {
     renderTabs();
   });
 
-
   // ---- wire explorer
-  reloadBtn.addEventListener("click", async () => {
-    await loadExplorer();
-  });
+  // reloadBtn.addEventListener("click", async () => {
+  //   await loadExplorer();
+  // });
 
   memoList.addEventListener("click", async (ev) => {
     const target = ev.target as HTMLElement | null;
@@ -511,23 +598,51 @@ function mountMemoUI(app: HTMLDivElement) {
     }
   });
 
-  // ---- nav actions
   async function goExplorer() {
-
     const r = await autoUpdateIfEditingCurrentMemo();
-    if (r === "updated") {
-      setDirty(false);
-      showMessage("Updated ✨");
-    }
-
+  
     setView("explorer");
+    showMessage(r === "updated" ? "Updated ✨ — Explorer opened" : "Explorer opened");
+  
     await loadExplorer();
+  }  
+
+  async function goDust() {
+    const r = await autoUpdateIfEditingCurrentMemo();
+    setView("dust");
+    showMessage(r === "updated" ? "Updated ✨ — Dust opened" : "Dust opened");
+    await loadDust();
   }
 
   goExplorerHandler = goExplorer;
 
+  sortExplorerHandler = async () => {
+    // Explorer 以外で押されたら事故防止：何もしないで案内だけ
+    if (state.view !== "explorer") {
+      showMessage("Sort is available in Explorer.");
+      return;
+    }
+  
+    // 1 → 2 → 3 → 1 ... （0からなら最初は1）
+    state.explorerSortMode = ((state.explorerSortMode % 3) + 1) as 1 | 2 | 3;
+  
+    // まだ未ロードなら読み込む（空配列のまま押された時用）
+    if (state.memos.length === 0) {
+      await loadExplorer();
+      // loadExplorer 内で render 済みだが、念のため現在modeで再描画
+      renderExplorer(getSortedExplorerList(state.memos));
+    } else {
+      renderExplorer(getSortedExplorerList(state.memos));
+    }
+  
+    showMessage(sortLabel(state.explorerSortMode));
+  };
+  
+
   // editorTabBtn.addEventListener("click", () => setView("editor"));
   openExplorerBtn.addEventListener("click", () => void goExplorer());
+
+  openDustBtn.addEventListener("click", () => void goDust());
 
   async function newDraft() {
 
@@ -554,10 +669,12 @@ function mountMemoUI(app: HTMLDivElement) {
   // ★ DOM生成後、state.view を必ず反映する
   setView(state.view);
 
-  // ★ Explorerだった場合は一覧も復元（タブ復帰でも勝手にEditorへ戻らない）
   if (state.view === "explorer") {
     void loadExplorer();
-  }  
+  } else if (state.view === "dust") {
+    void loadDust();
+  }
+    
   registerSaveShortcut();
 }
 
@@ -565,33 +682,18 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
   goExplorerHandler = null;
   newTabHandler = null;
 
-  app.innerHTML = `
-    <div class="layout" style="justify-content:center; align-items:center;">
-      <div style="width:min(420px, 92vw); background:#fff; border:1px solid #e3e6ea; border-radius:12px; padding:16px;">
-        <div style="font-weight:700; font-size:16px; margin-bottom:8px;">TypingNote Login</div>
-        <div style="font-size:12px; color:#666; margin-bottom:12px;">
-          サインアップ後、確認メールのリンクを開いてからログインしてください（メール確認必須）
-        </div>
+  app.innerHTML = mountAuthUIHtml;
 
-        ${message ? `<div style="white-space:pre-wrap; font-size:12px; color:#b00020; margin-bottom:10px;">${escapeHtml(message)}</div>` : ""}
+  // message の表示（HTML埋め込みはしない。textContentで安全に）
+  const msgEl = qs<HTMLDivElement>("#authMsg");
 
-        <label style="display:block; font-size:12px; margin-bottom:6px;">Email</label>
-        <input id="email" class="input" type="email" autocomplete="email" style="width:100%; padding:10px; border:1px solid #e3e6ea; border-radius:10px; margin-bottom:10px;" />
-
-        <label style="display:block; font-size:12px; margin-bottom:6px;">Password</label>
-        <input id="password" class="input" type="password" autocomplete="current-password" style="width:100%; padding:10px; border:1px solid #e3e6ea; border-radius:10px; margin-bottom:12px;" />
-
-        <div style="display:flex; gap:10px;">
-          <button id="signupBtn" class="btn" style="flex:1; padding:10px; border-radius:10px; border:1px solid #e3e6ea; background:#fff;">Sign up</button>
-          <button id="signinBtn" class="btn" style="flex:1; padding:10px; border-radius:10px; border:1px solid #111; background:#111; color:#fff;">Sign in</button>
-        </div>
-
-        <div style="font-size:12px; color:#666; margin-top:12px;">
-          ※メールが届かない場合は、Supabase → Authentication → Users で確認状態を見直してください。
-        </div>
-      </div>
-    </div>
-  `;
+  if (message) {
+    msgEl.hidden = false;
+    msgEl.textContent = message;
+  } else {
+    msgEl.hidden = true;
+    msgEl.textContent = "";
+  }
 
   const emailEl = qs<HTMLInputElement>("#email");
   const passEl = qs<HTMLInputElement>("#password");
@@ -607,8 +709,7 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
     try {
       const { email, password } = getValues();
       if (!email || !password) return mountAuthUI(app, "Email と Password を入力してください。");
-      const res = await signUp(email, password);
-      console.log("signUp:", res);
+      await signUp(email, password);
       mountAuthUI(app, "サインアップしました。\n確認メールのリンクを開いた後に Sign in してください。");
     } catch (e: any) {
       console.error(e);
@@ -627,30 +728,93 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
       mountAuthUI(app, e?.message ?? String(e));
     }
   });
+
+  const forgotBtn = qs<HTMLButtonElement>("#forgotBtn");
+
+  forgotBtn.addEventListener("click", async () => {
+    try {
+      const email = emailEl.value.trim();
+      if (!email) return mountAuthUI(app, "Email を入力してください。");
+
+      const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+      if (error) throw error;
+
+      mountAuthUI(app, "リセットメールを送信しました。メールのリンクを開いてください。");
+    } catch (e: any) {
+      console.error(e);
+      mountAuthUI(app, e?.message ?? String(e));
+    }
+  });
 }
+
+let authMode: "normal" | "recovery" = "normal";
+
+function mountResetPasswordUI(app: HTMLDivElement) {
+  app.innerHTML = resetPasswordUIHtml;
+
+  const msg = qs<HTMLDivElement>("#resetMsg");
+  const p1 = qs<HTMLInputElement>("#newPassword");
+  const p2 = qs<HTMLInputElement>("#newPassword2");
+  const form = qs<HTMLFormElement>("#resetForm");
+
+  const show = (t: string) => {
+    msg.hidden = false;
+    msg.textContent = t;
+  };
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const a = p1.value;
+    const b = p2.value;
+    if (!a || !b) return show("パスワードを入力してください");
+    if (a !== b) return show("確認用パスワードが一致しません");
+
+    const { error } = await supabase.auth.updateUser({ password: a });
+    if (error) return show(error.message);
+
+    show("更新しました。ログイン画面に戻ります。");
+    authMode = "normal";
+    await supabase.auth.signOut();
+    await rerender();
+  });
+}
+
+
+
 
 async function rerender() {
   const app = document.querySelector<HTMLDivElement>("#app");
   if (!app) throw new Error("#app not found");
 
-  const session = await getSession();
-  if (session) {
-    mountMemoUI(app);
-  } else {
-    mountAuthUI(app);
+  if (authMode === "recovery") {
+    mountResetPasswordUI(app);
+    return;
   }
+
+  const session = await getSession();
+  if (session) mountMemoUI(app);
+  else mountAuthUI(app);
 }
 
+
 async function mount() {
-  // auth state が変わった時も画面を更新
   supabase.auth.onAuthStateChange((event) => {
-    // タブ復帰やトークン更新で毎回UI作り直すのを防ぐ
+    if (event === "PASSWORD_RECOVERY") {
+      authMode = "recovery";
+      rerender().catch(console.error);
+      return;
+    }
+    if (event === "SIGNED_OUT") authMode = "normal";
+
     if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
       rerender().catch(console.error);
     }
   });
-  
+
   await rerender();
 }
+
 
 mount().catch(console.error);

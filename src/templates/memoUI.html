@@ -1,0 +1,57 @@
+<div class="layout">
+    <div class="app-top">
+        <header class="header">
+            <div class="topbar">
+                <div class="title">TypingNote</div>
+                <div class="sub">Editor / Explorer</div>
+                <button id="logoutBtn" class="btn" style="margin-left: auto">Logout</button>
+            </div>
+
+            <nav class="tabbar" aria-label="tabs">
+                <div class="tablist" id="tabList" role="tablist" aria-label="Tabs"></div>
+                <div class="tabbar-spacer" aria-hidden="true"></div>
+                <div class="tab-actions" aria-label="controls">
+                    <button class="tab util" id="newTabBtn" type="button" aria-label="New Memo">+</button>
+                    <button class="tab util" id="openExplorerBtn" type="button" aria-label="Open Explorer">EXPLORER</button>
+                    <button class="tab util" id="openDustBtn" type="button" aria-label="Open Dust">DUST</button>
+                </div>
+            </nav>
+        </header>
+
+        <div id="msgBar" class="msgbar" aria-live="polite" aria-atomic="true">
+            <span id="msgText" class="msgtext"></span>
+        </div>
+    </div>
+  
+    <main class="main">
+        <section id="editorView" class="view">
+            <div class="panes">
+                <section class="pane pane-left">
+                    <div class="pane-header">Input</div>
+                    <textarea id="memoInput" class="textarea" spellcheck="false"></textarea>
+                </section>
+
+                <section class="pane pane-right">
+                    <div class="pane-header">Preview</div>
+                    <div id="memoPreview" class="preview"></div>
+                </section>
+            </div>
+        </section>
+  
+        <section id="explorerView" class="view" hidden>
+            <div style="display: flex; gap: 8px; align-items: center; padding: 8px 0">
+                <!-- <button id="reloadBtn" class="btn" type="button">Reload</button> -->
+                <span id="listState" style="font-size: 12px; color: #666"></span>
+            </div>
+            <ul id="memoList" style="list-style: none; padding: 0; margin: 0"></ul>
+        </section>
+
+        <section id="dustView" class="view" hidden>
+            <div style="display: flex; gap: 8px; align-items: center; padding: 8px 0">
+              <span id="dustState" style="font-size: 12px; color: #666"></span>
+            </div>
+            <ul id="dustList" style="list-style: none; padding: 0; margin: 0"></ul>
+          </section>          
+    </main>
+</div>
+  

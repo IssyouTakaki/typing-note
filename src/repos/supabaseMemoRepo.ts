@@ -6,7 +6,8 @@ export type MemoRow = {
   user_id: string;
   content: string;
   created_at: string;
-  updated_at?: string | null; // テーブルによっては無い/NULLの可能性
+  updated_at?: string | null;
+  deleted_at?: string | null;
 };
 
 export async function createMemo(params: { userId: string; content: string }) {
@@ -30,6 +31,7 @@ export async function listMemos(params: { userId: string; limit?: number }) {
     .from("memos")
     .select("id,user_id,content,created_at,updated_at")
     .eq("user_id", userId)
+    .is("deleted_at", null) // ←追加（ゴミ箱除外）
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -54,9 +56,11 @@ export async function getMemo(params: { userId: string; id: string }) {
 export async function updateMemo(params: { userId: string; id: string; content: string }) {
   const { userId, id, content } = params;
 
+  const now = new Date().toISOString();
+
   const { data, error } = await supabase
     .from("memos")
-    .update({ content })
+    .update({ content, updated_at: now }) 
     .eq("user_id", userId)
     .eq("id", id)
     .select("id,user_id,content,created_at,updated_at")
@@ -64,4 +68,19 @@ export async function updateMemo(params: { userId: string; id: string; content: 
 
   if (error) throw error;
   return data as MemoRow;
+}
+
+export async function listDustMemos(params: { userId: string; limit?: number }) {
+  const { userId, limit = 50 } = params;
+
+  const { data, error } = await supabase
+    .from("memos")
+    .select("id,user_id,content,created_at,updated_at,deleted_at")
+    .eq("user_id", userId)
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+  return (data ?? []) as MemoRow[];
 }
