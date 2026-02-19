@@ -2,7 +2,10 @@
 import "./style.css";
 import { getSession, signIn, signOut, signUp } from "./repos/authRepo";
 import { supabase } from "./lib/supabaseClient";
-import { createMemo, getMemo, listMemos, listDustMemos, updateMemo, type MemoRow } from "./repos/supabaseMemoRepo";
+import {
+  createMemo, getMemo, listMemos, listDustMemos, updateMemo, trashMemo, restoreMemo, hardDeleteMemo,
+  type MemoRow
+} from "./repos/supabaseMemoRepo";
 
 import memoUIHtml from "./templates/memoUI.html?raw";
 import mountAuthUIHtml from "./templates/mountAuthUI.html?raw";
@@ -22,15 +25,18 @@ type AppState = {
   tabs: TabState[];
   activeTabId: string;
   memos: MemoRow[];
-  explorerSortMode: 0 | 1 | 2 | 3;
+  explorerSortMode: 0 | 1 | 2 | 3 | 4;
 };
 
 const DEFAULT_TEXT = `# Shortcut List
 
-1. ALT + SHIFT + CONTROL + 0 = Go To Explorer Tab
-2. ALT + SHIFT + CONTROL + S = Save a Memo
-3. ALT + SHIFT + CONTROL + T = Create a Memo
-4. ALT + SHIFT + CONTROL + O = Sort on Explorer Tab
+1. ALT + SHIFT + CONTROL + 1-8 = Go To Memo Tab
+2. ALT + SHIFT + CONTROL + 0 = Go To Dust Tab
+3. ALT + SHIFT + CONTROL + 9 = Go To Explorer Tab
+4. ALT + SHIFT + CONTROL + S = Save a Memo
+5. ALT + SHIFT + CONTROL + T = Create a Memo
+6. ALT + SHIFT + CONTROL + D = Delete a Memo
+7. ALT + SHIFT + CONTROL + O = Sort on Explorer Tab
 
 `;
 
@@ -43,7 +49,7 @@ const state: AppState = {
   ],
   activeTabId: firstTabId,
   memos: [],
-  explorerSortMode: 0,
+  explorerSortMode: 2,
 };
 
 function formatYmd(iso: string | null | undefined) {
@@ -86,7 +92,31 @@ function memoSnippet(content: string) {
   return s.length > 60 ? s.slice(0, 60) + "…" : s;
 }
 
+function memoSizeBytes(content: string): number {
+  // UTF-8バイト数（Blobは内部でUTF-8扱い）
+  try {
+    return new Blob([content]).size;
+  } catch {
+    // 念のためのフォールバック（環境によってBlobが無いケース）
+    return content.length;
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(1)} GB`;
+}
+
+
 const TAB_TITLE_MAX = 12;
+const MAX_TABS = 8;
+
 
 function extractFirstLineTitle(text: string, maxLen: number) {
   const first = (text.split("\n")[0] ?? "").trim();
@@ -98,8 +128,14 @@ function extractFirstLineTitle(text: string, maxLen: number) {
 let saveShortcutRegistered = false;
 
 let goExplorerHandler: (() => Promise<void>) | null = null;
+let goDustHandler: (() => Promise<void>) | null = null;
 let newTabHandler: (() => Promise<void>) | null = null;
 let sortExplorerHandler: (() => Promise<void>) | null = null;
+let deleteMemoHandler: (() => Promise<void>) | null = null;
+let closeTabHandler: (() => Promise<void>) | null = null;
+let switchTabHandler: ((digit: number) => Promise<void>) | null = null;
+
+
 
 function isSaveShortcut(e: KeyboardEvent) {
   const keyRow = e.key;
@@ -134,14 +170,138 @@ function isNewShortcut(e:KeyboardEvent) {
   return e.altKey && hasMod && e.shiftKey;  
 }
 
+function isDeleteShortcut(e: KeyboardEvent) {
+  const keyRow = e.key;
+  if (typeof keyRow !== "string") return false;
+  if (keyRow.toLowerCase() !== "d") return false;
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasMod = isMac ? e.metaKey : e.ctrlKey;
+  return e.altKey && e.shiftKey && hasMod;
+}
+
+function isCloseShortcut(e: KeyboardEvent) {
+  const keyRow = e.key;
+  if (typeof keyRow !== "string") return false;
+  if (keyRow.toLowerCase() !== "w") return false;
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasMod = isMac ? e.metaKey : e.ctrlKey;
+  return e.altKey && e.shiftKey && hasMod;
+}
+
+function keyConfirm(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "key-confirm-overlay";
+
+    const card = document.createElement("div");
+    card.className = "key-confirm";
+
+    const title = document.createElement("div");
+    title.className = "key-confirm-title";
+    title.textContent = "Confirm";
+
+    const body = document.createElement("div");
+    body.className = "key-confirm-body";
+    body.textContent = message;
+
+    const hint = document.createElement("div");
+    hint.className = "key-confirm-hint";
+    hint.textContent = "Press Y to delete / N to cancel";
+
+    card.append(title, body, hint);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      const k = typeof e.key === "string" ? e.key.toLowerCase() : "";
+      if (k !== "y" && k !== "n" && k !== "escape") return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+      resolve(k === "y");
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      overlay.remove();
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target !== overlay) return;
+      cleanup();
+      resolve(false);
+    });
+  });
+}
+
+type DustDecision = "erase" | "restore" | "cancel";
+
+function keyConfirmDust(message: string): Promise<DustDecision> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "key-confirm-overlay";
+
+    const card = document.createElement("div");
+    card.className = "key-confirm";
+
+    const title = document.createElement("div");
+    title.className = "key-confirm-title";
+    title.textContent = "Dust";
+
+    const body = document.createElement("div");
+    body.className = "key-confirm-body";
+    body.textContent = message;
+
+    const hint = document.createElement("div");
+    hint.className = "key-confirm-hint";
+    hint.textContent = "Press Y to erase forever / N to restore / Esc to cancel";
+
+    card.append(title, body, hint);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      const k = typeof e.key === "string" ? e.key.toLowerCase() : "";
+      if (k !== "y" && k !== "n" && k !== "escape") return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+
+      if (k === "y") resolve("erase");
+      else if (k === "n") resolve("restore");
+      else resolve("cancel");
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      overlay.remove();
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target !== overlay) return;
+      cleanup();
+      resolve("cancel");
+    });
+  });
+}
+
 function getShortcutDigit(e: KeyboardEvent): number | null {
   const isMac = navigator.platform.toLowerCase().includes("mac");
   const hasMod = isMac ? e.metaKey : e.ctrlKey;
 
-  // ここが「Alt + Ctrl(Win) / ⌘(Mac) + 数字」の入口
-  if (!e.altKey || !hasMod) return null;
+  // Alt + Shift + Ctrl(Win) / ⌘(Mac) + 数字
+  if (!e.altKey || !e.shiftKey || !hasMod) return null;
 
-  // code 優先（安定）
   if (e.code?.startsWith("Digit")) {
     const n = Number(e.code.slice("Digit".length));
     return Number.isFinite(n) ? n : null;
@@ -151,12 +311,12 @@ function getShortcutDigit(e: KeyboardEvent): number | null {
     return Number.isFinite(n) ? n : null;
   }
 
-  // フォールバック
   const k = typeof e.key === "string" ? e.key : "";
   if (/^[0-9]$/.test(k)) return Number(k);
 
   return null;
 }
+
 
 function qs<T extends Element>(selector: string): T {
   const el = document.querySelector(selector);
@@ -227,6 +387,7 @@ async function saveIfDirty(): Promise<SaveResult> {
 
     const created = await createMemo({userId, content: tab.text});
     tab.currentMemoId = created.id;
+    tab.dirty = false;
     return "created";
   }
 }
@@ -240,16 +401,20 @@ function registerSaveShortcut() {
     if (e.isComposing) return;
 
     const digit = getShortcutDigit(e);
-    
+
     if (digit !== null) {
       e.preventDefault();
-
+    
       if (digit === 0) {
+        if (goDustHandler) void goDustHandler();
+      } else if (digit === 9) {
         if (goExplorerHandler) void goExplorerHandler();
+      } else if (digit >= 1 && digit <= 8) {
+        if (switchTabHandler) void switchTabHandler(digit);
       }
-
+    
       return;
-    }
+    }    
 
     if (isExplorerSortShortcut(e)) {
       e.preventDefault();
@@ -260,6 +425,18 @@ function registerSaveShortcut() {
     if (isNewShortcut(e)) {
       e.preventDefault();
       if (newTabHandler) void newTabHandler();
+      return;
+    }
+
+    if (isDeleteShortcut(e)) {
+      e.preventDefault();
+      if (deleteMemoHandler) void deleteMemoHandler();
+      return;
+    }
+
+    if (isCloseShortcut(e)) {
+      e.preventDefault();
+      if (closeTabHandler) void closeTabHandler();
       return;
     }
 
@@ -310,14 +487,81 @@ function mountMemoUI(app: HTMLDivElement) {
   const listState = qs<HTMLSpanElement>("#listState");
   const memoList = qs<HTMLUListElement>("#memoList");
 
-  newTabHandler = async () => {
-    await createNewTab();
-  };  
+  // --- tab UX helpers (shortcut switching etc.)
+const getTabLabel = (t: TabState) => memoTitleFromContent(t.text);
 
+const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") => {
+  window.requestAnimationFrame(() => {
+    const btn = Array.from(
+      tabList.querySelectorAll<HTMLButtonElement>('button[data-tab-id]')
+    ).find((b) => b.dataset.tabId === tabId);
+
+    if (!btn) return;
+    // Scroll only within the tab list (horizontal)
+    btn.scrollIntoView({ behavior, block: "nearest", inline: "nearest" });
+  });
+};
+  newTabHandler = async () => {
+    if (state.tabs.length >= MAX_TABS) {
+      showMessage(`Max ${MAX_TABS} tabs — close one to add.`);
+      return;
+    }
+    await createNewTab();
+  };
+
+  switchTabHandler = async (digit: number) => {
+    const i = digit - 1;
+    const target = state.tabs[i];
+  
+    if (!target) {
+      showMessage(`No tab for shortcut ${digit}.`);
+      return;
+    }
+  
+    if (target.id === state.activeTabId) {
+      scrollTabIntoView(target.id);
+      showMessage(`Already on Tab ${digit}: ${getTabLabel(target)}`);
+      return;
+    }
+  
+    let saveResult: SaveResult = "noop";
+    try {
+      saveResult = await saveIfDirty(); // 未保存なら保存してから切替
+    } catch (err) {
+      console.error("save failed before switching tab", err);
+      showMessage("Oops — save failed 😵‍💫", 2500);
+      return; // 保存失敗 → 切替しない
+    }
+  
+    await activateTab(target.id);
+  
+    const title = getTabLabel(target);
+    if (saveResult === "updated") showMessage(`Updated ✨ → Tab ${digit}: ${title}`);
+    else if (saveResult === "created") showMessage(`Created 🚀 → Tab ${digit}: ${title}`);
+    else showMessage(`Switched → Tab ${digit}: ${title}`);
+  };
+  
   function renderTabs() {
-    tabList.innerHTML = state.tabs.map(t => {
-      const label = extractFirstLineTitle(t.text, TAB_TITLE_MAX);
+    const reached = state.tabs.length >= MAX_TABS;
+    newTabBtn.disabled = reached;
+    newTabBtn.setAttribute("aria-disabled", String(reached));
+    newTabBtn.title = reached ? `Max ${MAX_TABS} tabs (close one to add)` : "New Memo";
+
+    tabList.innerHTML = state.tabs
+    .map((t, idx) => {
+      const n = idx + 1;
+      const key = n <= 8 ? String(n) : "";
+      const prefix = key ? `${key}: ` : "";
+      const baseMax = key ? Math.max(6, TAB_TITLE_MAX - prefix.length) : TAB_TITLE_MAX;
+
+      const baseLabel = extractFirstLineTitle(t.text, baseMax);
+      const dirtyMark = t.dirty ? " *" : "";
+      const display = `${prefix}${baseLabel}${dirtyMark}`;
+
       const isActive = t.id === state.activeTabId;
+      const tip = key
+        ? `Tab ${n}: ${baseLabel} (Alt+Shift+Ctrl+${n})`
+        : `Tab ${n}: ${baseLabel}`;
 
       return `
         <button
@@ -326,11 +570,12 @@ function mountMemoUI(app: HTMLDivElement) {
           role="tab"
           data-tab-id="${escapeHtml(t.id)}"
           aria-selected="${isActive ? "true" : "false"}"
-          title="${escapeHtml(label)}"
-          aria-label="Tab: ${escapeHtml(label)}"
-        >${escapeHtml(label)}</button>
+          title="${escapeHtml(tip)}"
+          aria-label="${escapeHtml(tip)}"
+        >${escapeHtml(display)}</button>
       `;
-    }).join("");
+    })
+    .join("");
   }  
   
   async function activateTab(tabId: string) {
@@ -339,10 +584,17 @@ function mountMemoUI(app: HTMLDivElement) {
     renderEditor();     // active tab の内容を editor に流し込む
     renderTabs();       // active 表示更新
     setView("editor");
+    scrollTabIntoView(tabId);
     input.focus();
   }
-  
+
+
   async function createNewTab() {
+    if (state.tabs.length >= MAX_TABS) {
+      showMessage(`MAX ${MAX_TABS} tabs - close one to add.`);
+      return;      
+    }
+
     const id = crypto.randomUUID();
     state.tabs.push({ id, text: "", dirty: false, currentMemoId: null });
     await activateTab(id);
@@ -355,18 +607,6 @@ function mountMemoUI(app: HTMLDivElement) {
     void activateTab(tabId);
   });
   
-  // ---- view helpers
-  // function setView(view: ViewMode) {
-  //   state.view = view;
-
-  //   const isEditor = view === "editor";
-  //   editorView.hidden = !isEditor;
-  //   explorerView.hidden = isEditor;
-
-  //   openExplorerBtn.classList.toggle("is-active", !isEditor);
-  //   openExplorerBtn.setAttribute("aria-pressed", String(!isEditor));
-  // }
-
   function setView(view: ViewMode) {
     state.view = view;
   
@@ -424,13 +664,15 @@ function mountMemoUI(app: HTMLDivElement) {
         const snippet = escapeHtml(memoSnippet(m.content));
         const created = formatYmd(m.created_at);
         const updated = m.updated_at ? formatYmd(m.updated_at) : created;
+        const size = formatBytes(memoSizeBytes(m.content));
         return `
           <li style="border:1px solid #e3e6ea; border-radius:12px; padding:10px; margin-bottom:10px;">
             <button class="memo-row" data-id="${escapeHtml(m.id)}" type="button" style="all:unset; cursor:pointer; display:block; width:100%;">
               <div style="font-weight:700;">${title}</div>
               <div style="font-size:12px; color:#666; margin-top:6px;">
-                <div>Created Date: ${created}</div>
-                <div>Updated Date: ${updated}</div>
+                <div>Created Date:  ${created}</div>
+                <div>Updated Date:  ${updated}</div>
+                <div>Size:          ${size}</div>
               </div>
               <div style="font-size:12px; color:#333; margin-top:6px;">${snippet}</div>
             </button>
@@ -509,7 +751,20 @@ function mountMemoUI(app: HTMLDivElement) {
       });
     }
 
-    // 3) 作成順（新しい順）
+    if (mode === 4) {
+      // 4) サイズ順（大きい順）
+      return [...list].sort((a, b) => {
+        const sa = memoSizeBytes(a.content);
+        const sb = memoSizeBytes(b.content);
+        if (sb !== sa) return sb - sa; // 大きい順
+        // サイズが同じなら新しい作成日を優先（安定化）
+        const da = Date.parse(a.created_at);
+        const db = Date.parse(b.created_at);
+        return db - da;
+      });
+    }
+
+    // 3) アップロード順（新しい順）= created_at desc
     return [...list].sort((a, b) => {
       const da = Date.parse(a.created_at);
       const db = Date.parse(b.created_at);
@@ -517,10 +772,11 @@ function mountMemoUI(app: HTMLDivElement) {
     });
   }
 
-  function sortLabel(mode: 0 | 1 | 2 | 3) {
+  function sortLabel(mode: 0 | 1 | 2 | 3 | 4) {
     if (mode === 1) return "Sort: Title (A→あ)";
     if (mode === 2) return "Sort: Updated (newest)";
-    if (mode === 3) return "Sort: Created (newest)";
+    if (mode === 3) return "Sort: Uploaded (newest)";
+    if (mode === 4) return "Sort: Size (largest)";
     return "Sort: (not set)";
   }
 
@@ -532,7 +788,7 @@ function mountMemoUI(app: HTMLDivElement) {
       const list = await listMemos({ userId, limit: 50 });
       state.memos = list;
       renderExplorer(getSortedExplorerList(list));
-      listState.textContent = `${list.length} memos`;
+      listState.textContent = `${list.length} memos · ${sortLabel(state.explorerSortMode)}`;
     } catch (e) {
       console.error(e);
       listState.textContent = "Failed to load";
@@ -598,6 +854,50 @@ function mountMemoUI(app: HTMLDivElement) {
     }
   });
 
+  // ---- wire dust (erase forever / restore)
+  dustList.addEventListener("click", async (ev) => {
+    const target = ev.target as HTMLElement | null;
+    const btn = target?.closest<HTMLButtonElement>("button.memo-row");
+    const id = btn?.dataset.id;
+    if (!id) return;
+
+    try {
+      const userId = await requireUserId();
+      const memo = await getMemo({ userId, id });
+      if (!memo) return;
+
+      const title = memoTitleFromContent(memo.content);
+      const decision = await keyConfirmDust(
+        `"${title}"\n\nErase forever? (Y)\nRestore to Explorer? (N)`
+      );
+
+      if (decision === "erase") {
+        await hardDeleteMemo({ userId, id });
+
+        showMessage("Deleted forever 🔥");
+        await loadDust();       // Dust を再描画
+        setView("dust");
+        return;
+      }
+
+      if (decision === "restore") {
+        await restoreMemo({ userId, id });
+
+        showMessage("Restored ✨");
+        await goExplorer();     // Explorer を開いて一覧を再描画
+        setView("dust");
+
+        void loadExplorer();
+        return;
+      }
+
+      showMessage("Canceled.");
+    } catch (e) {
+      console.error(e);
+      showMessage("Oops — action failed 😵‍💫", 2500);
+    }
+  });
+
   async function goExplorer() {
     const r = await autoUpdateIfEditingCurrentMemo();
   
@@ -615,6 +915,106 @@ function mountMemoUI(app: HTMLDivElement) {
   }
 
   goExplorerHandler = goExplorer;
+  goDustHandler = goDust;
+
+  closeTabHandler = async () => {
+    const viewBefore = state.view;
+  
+    try {
+      const tab = activeTab();
+      const title = extractFirstLineTitle(tab.text, TAB_TITLE_MAX);
+  
+      // 未保存なら保存してから閉じる
+      const needsSave = tab.dirty || (tab.currentMemoId === null && tab.text.trim() !== "");
+      if (needsSave) {
+        const userId = await requireUserId();
+  
+        if (tab.currentMemoId) {
+          await updateMemo({ userId, id: tab.currentMemoId, content: tab.text });
+        } else {
+          const created = await createMemo({ userId, content: tab.text });
+          tab.currentMemoId = created.id;
+        }
+  
+        tab.dirty = false;
+      }
+  
+      const idx = state.tabs.findIndex((t) => t.id === tab.id);
+      if (idx < 0) return;
+  
+      // 最後の1枚なら「空の新規タブ」に置き換える
+      if (state.tabs.length === 1) {
+        const newId = crypto.randomUUID();
+        state.tabs = [{ id: newId, text: "", dirty: false, currentMemoId: null }];
+        state.activeTabId = newId;
+  
+        renderEditor();
+        renderTabs();
+        setView(viewBefore);
+        if (viewBefore === "editor") input.focus();
+  
+        showMessage(needsSave ? `Saved & closed: ${title}` : `Closed: ${title}`);
+        return;
+      }
+  
+      // タブ削除 → 次のアクティブを決定
+      state.tabs.splice(idx, 1);
+      const next = state.tabs[Math.max(0, idx - 1)];
+      state.activeTabId = next.id;
+  
+      // 表示更新（ビューは維持）
+      renderTabs();
+      if (viewBefore === "editor") {
+        renderEditor();
+        input.focus();
+      }
+      setView(viewBefore);
+  
+      showMessage(needsSave ? `Saved & closed: ${title}` : `Closed: ${title}`);
+    } catch (err) {
+      console.error("close tab failed", err);
+      showMessage("Oops — close tab failed 😵‍💫", 2500);
+    }
+  };  
+
+  deleteMemoHandler = async () => {
+    if (state.view !== "editor") {
+      showMessage("Delete is available in Editor.");
+      return;
+    }
+  
+    const tab = activeTab();
+    if (!tab.currentMemoId) {
+      showMessage("Nothing to delete — save the memo first.");
+      return;
+    }
+  
+    const title = memoTitleFromContent(tab.text);
+    const ok = await keyConfirm(`Move "${title}" to Dust?`);
+    if (!ok) {
+      showMessage("Canceled.");
+      return;
+    }
+  
+    try {
+      await autoUpdateIfEditingCurrentMemo(); // dirtyなら更新してから捨てる
+      const userId = await requireUserId();
+      await trashMemo({ userId, id: tab.currentMemoId });
+  
+      tab.currentMemoId = null;
+      tab.text = "";
+      tab.dirty = false;
+  
+      renderEditor();
+      renderTabs();
+  
+      showMessage("Moved to Dust 🗑️");
+      await goDust(); // 捨てた後にDUST表示
+    } catch (err) {
+      console.error("delete failed", err);
+      showMessage("Oops — delete failed 😵‍💫", 2500);
+    }
+  };
 
   sortExplorerHandler = async () => {
     // Explorer 以外で押されたら事故防止：何もしないで案内だけ
@@ -623,8 +1023,8 @@ function mountMemoUI(app: HTMLDivElement) {
       return;
     }
   
-    // 1 → 2 → 3 → 1 ... （0からなら最初は1）
-    state.explorerSortMode = ((state.explorerSortMode % 3) + 1) as 1 | 2 | 3;
+    // 1 → 2 → 3 → 4 → 1 ... （0からなら最初は1）
+    state.explorerSortMode = ((state.explorerSortMode % 4) + 1) as 1 | 2 | 3 | 4;
   
     // まだ未ロードなら読み込む（空配列のまま押された時用）
     if (state.memos.length === 0) {
@@ -657,9 +1057,12 @@ function mountMemoUI(app: HTMLDivElement) {
     input.focus();    
   }
 
-  // newTabHandler = newDraft;
-  // newTabBtn.addEventListener("click", () => void newDraft());
-  newTabBtn.addEventListener("click", () => void createNewTab());
+  // newTabBtn.addEventListener("click", () => void createNewTab());
+
+  newTabBtn.addEventListener("click", () => {
+    if (newTabHandler) void newTabHandler();
+    else void createNewTab();
+  });
 
   logoutBtn.addEventListener("click", async () => {
     await signOut();
@@ -680,7 +1083,12 @@ function mountMemoUI(app: HTMLDivElement) {
 
 function mountAuthUI(app: HTMLDivElement, message = "") {
   goExplorerHandler = null;
+  goDustHandler = null;
   newTabHandler = null;
+  sortExplorerHandler = null;
+  deleteMemoHandler = null;
+  closeTabHandler = null;
+  switchTabHandler = null;
 
   app.innerHTML = mountAuthUIHtml;
 

@@ -50,12 +50,22 @@ body {
   padding: 0 8px;
   margin-top: 6px;
   border-bottom: 1px solid #c9cccf;
+
+  width: 100%;
+  overflow: hidden;
+  align-items: stretch;
 }
 
 .tablist {
   display: flex;
   align-items: flex-start;
   gap: 4px;
+
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .tab {
@@ -72,9 +82,12 @@ body {
   height: 32px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 6px;
 
   transition: background 0.15s ease;
+
+  flex: 0 0 auto;
 }
 
 .app-top{
@@ -116,9 +129,9 @@ body {
   overflow: hidden;
 }
 
-
 .tabbar-spacer {
-  flex: 1;
+  flex: 0 0 auto;
+  width: 8px;
 }
 
 .tab-actions {
@@ -126,6 +139,8 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 6px;
+
+  flex: 0 0 auto;
 }
 
 .tab.util {
@@ -136,6 +151,7 @@ body {
   padding: 6px 10px;
   border-radius: 8px 8px 0px 0px;
   height: 32px;
+  justify-content: center;
 }
 
 .tab.util.is-active {
@@ -143,6 +159,21 @@ body {
 }
 
 .tab.util:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.tab.util:disabled{
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* メモタブ（複数タブ）のアクティブ表示 */
+.tab.is-active:not(.util){
+  background: rgba(0, 0, 0, 0.10);
+}
+
+/* ついでに hover も揃えるなら */
+.tab:not(.util):hover{
   background: rgba(0, 0, 0, 0.08);
 }
 
@@ -219,6 +250,43 @@ body {
   word-break: break-word;
   font-size: 14px;
   line-height: 1.6;
+}
+
+.key-confirm-overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.key-confirm{
+  width: min(440px, 92vw);
+  background: #fff;
+  border: 1px solid #e3e6ea;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.18);
+}
+
+.key-confirm-title{
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.key-confirm-body{
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.key-confirm-hint{
+  margin-top: 12px;
+  font-size: 12px;
+  color: #666;
 }
 
 /* hidden 属性は絶対に非表示にする（CSS競合対策） */

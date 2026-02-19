@@ -84,3 +84,48 @@ export async function listDustMemos(params: { userId: string; limit?: number }) 
   if (error) throw error;
   return (data ?? []) as MemoRow[];
 }
+
+export async function trashMemo(params: { userId: string; id: string }) {
+  const { userId, id } = params;
+  const now = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("memos")
+    .update({ deleted_at: now, updated_at: now })
+    .eq("user_id", userId)
+    .eq("id", id)
+    .select("id,user_id,content,created_at,updated_at,deleted_at")
+    .single();
+
+  if (error) throw error;
+  return data as MemoRow;
+}
+
+export async function restoreMemo(params: { userId: string; id: string }) {
+  const { userId, id } = params;
+  const now = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("memos")
+    .update({ deleted_at: null, updated_at: now })
+    .eq("user_id", userId)
+    .eq("id", id)
+    .select("id,user_id,content,created_at,updated_at,deleted_at")
+    .single();
+
+  if (error) throw error;
+  return data as MemoRow;
+}
+
+export async function hardDeleteMemo(params: { userId: string; id: string }) {
+  const { userId, id } = params;
+
+  const { error } = await supabase
+    .from("memos")
+    .delete()
+    .eq("user_id", userId)
+    .eq("id", id);
+
+  if (error) throw error;
+  return true;
+}
