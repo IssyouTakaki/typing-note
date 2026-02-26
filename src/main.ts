@@ -26,17 +26,43 @@ type AppState = {
   activeTabId: string;
   memos: MemoRow[];
   explorerSortMode: 0 | 1 | 2 | 3 | 4;
+
+    // --- List focus / multi-select (Explorer & Dust) ---
+    explorerFocusId: string | null;
+    explorerSelectedIds: Set<string>;
+    dustFocusId: string | null;
+    dustSelectedIds: Set<string>;
 };
 
 const DEFAULT_TEXT = `# Shortcut List
 
-1. ALT + SHIFT + CONTROL + 1-8 = Go To Memo Tab
-2. ALT + SHIFT + CONTROL + 0 = Go To Dust Tab
-3. ALT + SHIFT + CONTROL + 9 = Go To Explorer Tab
-4. ALT + SHIFT + CONTROL + S = Save a Memo
-5. ALT + SHIFT + CONTROL + T = Create a Memo
-6. ALT + SHIFT + CONTROL + D = Delete a Memo
-7. ALT + SHIFT + CONTROL + O = Sort on Explorer Tab
+01. ALT + SHIFT + CONTROL + 1-8 = Go To Memo Tab
+02. ALT + SHIFT + CONTROL + 0 = Go To Dust Tab
+03. ALT + SHIFT + CONTROL + 9 = Go To Explorer Tab
+04. ALT + SHIFT + CONTROL + S = Save a Memo
+05. ALT + SHIFT + CONTROL + T = Create a Memo
+06. ALT + SHIFT + CONTROL + D = Delete a Memo
+07. ALT + SHIFT + CONTROL + O = Sort on Explorer Tab
+08. ALT + SHIFT + CONTROL + SPACE = (Explorer/Dust) Toggle select (multi)
+09. (Explorer/Dust) Arrow Up/Down = Move focus
+10. (Explorer/Dust) Enter = Open focused memo (when none selected)
+11. ALT + SHIFT + CONTROL + V = Toggle Preview Wide (Hide/Show Input)
+
+# Markdown Preview (implemented)
+
+- Headings: # / ## / ###
+- Unordered list: - item
+- Ordered list: 1. item
+- Horizontal rule: ---
+
+Inline code example: \`const x = 1;\`
+
+Code block example:
+\`\`\`ts
+function hello() {
+  console.log("hi");
+}
+\`\`\`
 
 `;
 
@@ -50,7 +76,14 @@ const state: AppState = {
   activeTabId: firstTabId,
   memos: [],
   explorerSortMode: 2,
+  
+  // --- List focus / multi-select (Explorer & Dust) ---
+  explorerFocusId: null,
+  explorerSelectedIds: new Set<string>(),
+  dustFocusId: null,
+  dustSelectedIds: new Set<string>(),
 };
+
 
 function formatYmd(iso: string | null | undefined) {
   if (!iso) return "—";
@@ -75,6 +108,184 @@ function escapeHtml(input: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function renderInlineCode(input: string): string {
+  // `code` を <code> に変換し、それ以外は escape
+  // ※閉じ ` が無い場合は、残りを普通のテキストとして扱う
+  let out = "";
+  let i = 0;
+
+  while (i < input.length) {
+    const s = input.indexOf("`", i);
+    if (s === -1) {
+      out += escapeHtml(input.slice(i));
+      break;
+    }
+
+    out += escapeHtml(input.slice(i, s));
+
+    const e = input.indexOf("`", s + 1);
+    if (e === -1) {
+      out += escapeHtml(input.slice(s)); // unmatched `
+      break;
+    }
+
+    const code = input.slice(s + 1, e);
+    out += `<code class="md-code-inline">${escapeHtml(code)}</code>`;
+    i = e + 1;
+  }
+
+  return out;
+}
+
+// --- Minimal Markdown (Phase 3): headings + lists + hr + code blocks + inline code
+function renderPreviewMarkdown(text: string): string {
+  const lines = text.split(/\r?\n/);
+
+  const parts: string[] = [];
+  let buf: string[] = [];
+  let listMode: "ul" | "ol" | null = null;
+
+  // fenced code block state
+  let inFence = false;
+  let fenceLang = "";
+  let fenceBuf: string[] = [];
+
+  const flushText = () => {
+    if (buf.length === 0) return;
+    const html = renderInlineCode(buf.join("\n"));
+    parts.push(`<pre class="preview-pre">${html}</pre>`);
+    buf = [];
+  };
+
+  const closeList = () => {
+    if (!listMode) return;
+    parts.push(listMode === "ul" ? `</ul>` : `</ol>`);
+    listMode = null;
+  };
+
+  const openList = (mode: "ul" | "ol") => {
+    if (listMode === mode) return;
+    closeList();
+    flushText();
+    parts.push(mode === "ul" ? `<ul class="md-ul">` : `<ol class="md-ol">`);
+    listMode = mode;
+  };
+
+  const flushFence = () => {
+    const code = escapeHtml(fenceBuf.join("\n"));
+    const langAttr = fenceLang ? ` data-lang="${escapeHtml(fenceLang)}"` : "";
+    parts.push(
+      `<pre class="md-codeblock"${langAttr}><code class="md-code">${code}</code></pre>`
+    );
+    fenceBuf = [];
+    fenceLang = "";
+  };
+
+  for (const line of lines) {
+    // --- fenced code block ---
+    const fenceMatch = line.match(/^\s*```(\S*)\s*$/);
+    if (fenceMatch) {
+      // toggle
+      if (!inFence) {
+        closeList();
+        flushText();
+        inFence = true;
+        fenceLang = (fenceMatch[1] ?? "").trim(); // ```ts みたいな言語指定は任意
+        fenceBuf = [];
+      } else {
+        // close fence
+        inFence = false;
+        flushFence();
+      }
+      continue;
+    }
+
+    if (inFence) {
+      // inside code block: do NOT parse markdown
+      fenceBuf.push(line);
+      continue;
+    }
+
+    // horizontal rule: "---"
+    if (/^\s*---\s*$/.test(line)) {
+      closeList();
+      flushText();
+      parts.push(`<hr class="md-hr">`);
+      continue;
+    }
+
+    // blank line
+    if (line.trim() === "") {
+      if (listMode) {
+        closeList();
+        parts.push(`<div class="md-blank"></div>`);
+      } else {
+        if (buf.length === 0) parts.push(`<div class="md-blank"></div>`);
+        else buf.push("");
+      }
+      continue;
+    }
+
+    // headings (# / ## / ###)
+    {
+      const m = line.match(/^(#{1,3})\s*(.+)$/);
+      if (m) {
+        const level = m[1].length as 1 | 2 | 3;
+        const content = m[2].trim();
+        if (content.length > 0) {
+          closeList();
+          flushText();
+          parts.push(
+            `<h${level} class="md-h${level}">${renderInlineCode(content)}</h${level}>`
+          );
+          continue;
+        }
+      }
+    }
+
+    // unordered list: "- item"
+    {
+      const m = line.match(/^\s*-\s+(.+)$/);
+      if (m) {
+        const content = m[1].trim();
+        if (content.length > 0) {
+          openList("ul");
+          parts.push(`<li class="md-li">${renderInlineCode(content)}</li>`);
+          continue;
+        }
+      }
+    }
+
+    // ordered list: "1. item"
+    {
+      const m = line.match(/^\s*(\d+)\.\s+(.+)$/);
+      if (m) {
+        const content = m[2].trim();
+        if (content.length > 0) {
+          openList("ol");
+          parts.push(`<li class="md-li">${renderInlineCode(content)}</li>`);
+          continue;
+        }
+      }
+    }
+
+    // normal text
+    if (listMode) closeList();
+    buf.push(line);
+  }
+
+  // EOF: fence が閉じられていない場合も一応表示
+  if (inFence) {
+    inFence = false;
+    flushFence();
+  }
+
+  closeList();
+  flushText();
+
+  return `<div class="md-preview">${parts.join("\n")}</div>`;
 }
 
 function renderPreviewText(text: string): string {
@@ -134,6 +345,15 @@ let sortExplorerHandler: (() => Promise<void>) | null = null;
 let deleteMemoHandler: (() => Promise<void>) | null = null;
 let closeTabHandler: (() => Promise<void>) | null = null;
 let switchTabHandler: ((digit: number) => Promise<void>) | null = null;
+let togglePreviewWideHandler: (() => Promise<void>) | null = null;
+
+// --- List focus / multi-select (Explorer & Dust) ---
+let explorerSelectToggleHandler: (() => Promise<void>) | null = null;
+let explorerMoveFocusHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
+let explorerOpenFocusHandler: (() => Promise<void>) | null = null;
+let dustSelectToggleHandler: (() => Promise<void>) | null = null;
+let dustMoveFocusHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
+let dustOpenFocusHandler: (() => Promise<void>) | null = null;
 
 
 
@@ -156,6 +376,18 @@ function isExplorerSortShortcut(e: KeyboardEvent) {
   const isMac = navigator.platform.toLowerCase().includes("mac");
   const hasMod = isMac ? e.metaKey : e.ctrlKey;
 
+  return e.altKey && e.shiftKey && hasMod;
+}
+
+function isListSelectToggleShortcut(e: KeyboardEvent) {
+  const keyRow = e.key;
+  if (typeof keyRow !== "string") return false;
+  // Space can be reported as " " or "Space"
+  const isSpace = keyRow === " " || keyRow === "Space" || e.code === "Space";
+  if (!isSpace) return false;
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasMod = isMac ? e.metaKey : e.ctrlKey;
   return e.altKey && e.shiftKey && hasMod;
 }
 
@@ -187,6 +419,17 @@ function isCloseShortcut(e: KeyboardEvent) {
 
   const isMac = navigator.platform.toLowerCase().includes("mac");
   const hasMod = isMac ? e.metaKey : e.ctrlKey;
+  return e.altKey && e.shiftKey && hasMod;
+}
+
+function isTogglePreviewWideShortcut(e: KeyboardEvent) {
+  const keyRow = e.key;
+  if (typeof keyRow !== "string") return false;
+  if (keyRow.toLowerCase() !== "v") return false;
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasMod = isMac ? e.metaKey : e.ctrlKey;
+
   return e.altKey && e.shiftKey && hasMod;
 }
 
@@ -325,14 +568,29 @@ function qs<T extends Element>(selector: string): T {
 }
 
 let msgTimer: number | undefined;
+let msgHoldUntil = 0;
 
-function showMessage(text: string, ms = 1800) {
+function calcMessageDurationMs(text: string): number {
+  // 文字数が長いほど表示時間を伸ばす（短文は最低でも少し長め）
+  const len = text.replace(/\s+/g, " ").trim().length;
+  const auto = 2500 + len * 55; // 目安: 20文字=約3.6s / 60文字=約5.8s
+  const min = 5000;
+  const max = 20000;
+  return Math.min(max, Math.max(min, auto));
+}
+
+function showMessage(text: string, ms?: number) {
   const msgText = qs<HTMLSpanElement>("#msgText");
+  const duration = ms ?? calcMessageDurationMs(text);
+
   msgText.textContent = text;
+  msgHoldUntil = Date.now() + duration;
+
   if (msgTimer) window.clearTimeout(msgTimer);
   msgTimer = window.setTimeout(() => {
+    msgHoldUntil = 0;
     msgText.textContent = activeTab().dirty ? "Unsaved" : "";
-  }, ms);
+  }, duration);
 }
 
 async function requireUserId(): Promise<string> {
@@ -414,7 +672,55 @@ function registerSaveShortcut() {
       }
     
       return;
-    }    
+    }
+
+    if (isTogglePreviewWideShortcut(e)) {
+      e.preventDefault();
+      if (togglePreviewWideHandler) void togglePreviewWideHandler();
+      return;
+    }
+    
+    // --- Explorer/Dust: focus move & multi-select ---
+    if (state.view === "explorer" || state.view === "dust") {
+      if (isListSelectToggleShortcut(e)) {
+        e.preventDefault();
+        if (state.view === "explorer") {
+          if (explorerSelectToggleHandler) void explorerSelectToggleHandler();
+        } else {
+          if (dustSelectToggleHandler) void dustSelectToggleHandler();
+        }
+        return;
+      }
+
+      if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        const delta: -1 | 1 = e.key === "ArrowUp" ? -1 : 1;
+        if (state.view === "explorer") {
+          if (explorerMoveFocusHandler) void explorerMoveFocusHandler(delta);
+        } else {
+          if (dustMoveFocusHandler) void dustMoveFocusHandler(delta);
+        }
+        return;
+      }
+
+      if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "Enter") {
+        // Open focused memo only when nothing is selected
+        if (state.view === "explorer") {
+          if (state.explorerSelectedIds.size === 0 && explorerOpenFocusHandler) {
+            e.preventDefault();
+            void explorerOpenFocusHandler();
+          }
+        } else {
+          if (state.dustSelectedIds.size === 0 && dustOpenFocusHandler) {
+            e.preventDefault();
+            void dustOpenFocusHandler();
+          }
+        }
+        return;
+      }
+    }
+
+
 
     if (isExplorerSortShortcut(e)) {
       e.preventDefault();
@@ -424,7 +730,23 @@ function registerSaveShortcut() {
 
     if (isNewShortcut(e)) {
       e.preventDefault();
-      if (newTabHandler) void newTabHandler();
+      if (!newTabHandler) return;
+    
+      const before = state.tabs.length;
+      try {
+        await newTabHandler();
+      } catch (err) {
+        console.error("new tab failed", err);
+        showMessage("Oops — failed to create a tab 😵‍💫", 2500);
+        return;
+      }
+    
+      // タブが増えたときだけメッセージ表示（MAX到達などは増えない）
+      if (state.tabs.length > before) {
+        const idx = state.tabs.findIndex((t) => t.id === state.activeTabId);
+        const n = idx >= 0 ? idx + 1 : state.tabs.length;
+        showMessage(`New tab 🆕 → Tab ${n}`);
+      }
       return;
     }
 
@@ -483,9 +805,141 @@ function mountMemoUI(app: HTMLDivElement) {
   const preview = qs<HTMLDivElement>("#memoPreview");
   const msgText = qs<HTMLSpanElement>("#msgText");
 
+  const panes = qs<HTMLDivElement>("#editorView .panes");
+
+  const inputPane = input.closest<HTMLElement>(".pane");
+  if (!inputPane) throw new Error("input pane not found");
+
+  let isPreviewWide = false;
+
+  const applyPreviewWide = (on: boolean) => {
+    // Input を隠す（CSSの [hidden] が display:none にする）
+    inputPane.hidden = on;
+
+    // Preview を全幅化（grid を 1列に）
+    panes.style.gridTemplateColumns = on ? "1fr" : "";
+
+    // フォーカス事故防止：Input を隠すなら blur、戻すなら focus
+    if (on) {
+      if (document.activeElement === input) input.blur();
+    } else {
+      input.focus();
+    }
+  };
+
+  const focusEditorInputIfVisible = () => {
+    if (state.view !== "editor") return;
+    if (isPreviewWide) return;
+    input.focus();
+  };
+
+  // 初期反映
+  applyPreviewWide(isPreviewWide);
+
   // const reloadBtn = qs<HTMLButtonElement>("#reloadBtn");
   const listState = qs<HTMLSpanElement>("#listState");
   const memoList = qs<HTMLUListElement>("#memoList");
+  
+  // --- List focus / multi-select (Explorer & Dust) ---
+  let explorerOrderedIds: string[] = [];
+  let dustOrderedIds: string[] = [];
+  let dustTotal = 0;
+
+  const updateExplorerStateText = () => {
+    const base = `${state.memos.length} memos · ${sortLabel(state.explorerSortMode)}`;
+    listState.textContent = `${base} · Selected: ${state.explorerSelectedIds.size}`;
+  };
+
+  const updateDustStateText = () => {
+    dustState.textContent = `${dustTotal} trashed memos · Selected: ${state.dustSelectedIds.size}`;
+  };
+
+  const syncListClasses = (ul: HTMLUListElement, focusId: string | null, selected: Set<string>) => {
+    const items = ul.querySelectorAll<HTMLLIElement>("li.memo-item");
+    items.forEach((li) => {
+      const id = li.dataset.id ?? "";
+      li.classList.toggle("is-selected", selected.has(id));
+      li.classList.toggle("is-focused", !!focusId && id === focusId);
+    });
+  };
+
+  const scrollFocusIntoView = (ul: HTMLUListElement, focusId: string | null, behavior: ScrollBehavior = "smooth") => {
+    if (!focusId) return;
+    const esc = (globalThis as any).CSS?.escape ? (globalThis as any).CSS.escape(focusId) : focusId;
+    const el = ul.querySelector<HTMLLIElement>(`li.memo-item[data-id="${esc}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior, block: "nearest" });
+  };
+
+  const ensureFocus = (orderedIds: string[], current: string | null): string | null => {
+    if (orderedIds.length === 0) return null;
+    if (!current || !orderedIds.includes(current)) return orderedIds[0];
+    return current;
+  };
+
+  const moveFocus = (orderedIds: string[], current: string | null, delta: -1 | 1): string | null => {
+    if (orderedIds.length === 0) return null;
+    const curId = current ?? orderedIds[0];
+    let idx = orderedIds.indexOf(curId);
+    if (idx < 0) idx = 0;
+    const next = Math.max(0, Math.min(orderedIds.length - 1, idx + delta));
+    return orderedIds[next];
+  };
+
+  const toggleSelectAtFocus = (focusId: string | null, selected: Set<string>) => {
+    if (!focusId) return;
+    if (selected.has(focusId)) selected.delete(focusId);
+    else selected.add(focusId);
+  };
+
+  const pruneSelection = (selected: Set<string>, idsInList: string[]) => {
+    if (selected.size === 0) return;
+    const set = new Set(idsInList);
+    for (const id of Array.from(selected)) {
+      if (!set.has(id)) selected.delete(id);
+    }
+  };
+
+  const ensureExplorerFocus = () => {
+    state.explorerFocusId = ensureFocus(explorerOrderedIds, state.explorerFocusId);
+  };
+
+  const ensureDustFocus = () => {
+    state.dustFocusId = ensureFocus(dustOrderedIds, state.dustFocusId);
+  };
+
+  const moveExplorerFocus = (delta: -1 | 1) => {
+    if (state.view !== "explorer") return;
+    state.explorerFocusId = moveFocus(explorerOrderedIds, state.explorerFocusId, delta);
+    syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
+    scrollFocusIntoView(memoList, state.explorerFocusId);
+  };
+
+  const moveDustFocus = (delta: -1 | 1) => {
+    if (state.view !== "dust") return;
+    state.dustFocusId = moveFocus(dustOrderedIds, state.dustFocusId, delta);
+    syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
+    scrollFocusIntoView(dustList, state.dustFocusId);
+  };
+
+  const toggleExplorerSelectionAtFocus = () => {
+    if (state.view !== "explorer") return;
+    ensureExplorerFocus();
+    toggleSelectAtFocus(state.explorerFocusId, state.explorerSelectedIds);
+    syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
+    updateExplorerStateText();
+    scrollFocusIntoView(memoList, state.explorerFocusId);
+  };
+
+  const toggleDustSelectionAtFocus = () => {
+    if (state.view !== "dust") return;
+    ensureDustFocus();
+    toggleSelectAtFocus(state.dustFocusId, state.dustSelectedIds);
+    syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
+    updateDustStateText();
+    scrollFocusIntoView(dustList, state.dustFocusId);
+  };
+
 
   // --- tab UX helpers (shortcut switching etc.)
 const getTabLabel = (t: TabState) => memoTitleFromContent(t.text);
@@ -519,8 +973,14 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     }
   
     if (target.id === state.activeTabId) {
+      // Explorer/Dustにいる場合は「同じタブに戻る＝Editorへ戻る」として扱う
       scrollTabIntoView(target.id);
-      showMessage(`Already on Tab ${digit}: ${getTabLabel(target)}`);
+      if (state.view !== "editor") {
+        await activateTab(target.id); // setView("editor") が走る → 選択解除も発火
+        showMessage(`Back → Tab ${digit}: ${getTabLabel(target)}`);
+      } else {
+        showMessage(`Already on Tab ${digit}: ${getTabLabel(target)}`);
+      }
       return;
     }
   
@@ -585,7 +1045,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     renderTabs();       // active 表示更新
     setView("editor");
     scrollTabIntoView(tabId);
-    input.focus();
+    // input.focus();
+    focusEditorInputIfVisible();
   }
 
 
@@ -596,7 +1057,7 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     }
 
     const id = crypto.randomUUID();
-    state.tabs.push({ id, text: "", dirty: false, currentMemoId: null });
+    state.tabs.push({ id, text: DEFAULT_TEXT, dirty: false, currentMemoId: null });
     await activateTab(id);
   }
   
@@ -608,6 +1069,24 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
   });
   
   function setView(view: ViewMode) {
+    const prev = state.view;
+
+    // Clear list selections when leaving Explorer/Dust
+    if (prev === "explorer" && view !== "explorer") {
+      if (state.explorerSelectedIds.size > 0) {
+        state.explorerSelectedIds.clear();
+        syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
+        updateExplorerStateText();
+      }
+    }
+    if (prev === "dust" && view !== "dust") {
+      if (state.dustSelectedIds.size > 0) {
+        state.dustSelectedIds.clear();
+        syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
+        updateDustStateText();
+      }
+    }
+
     state.view = view;
   
     const isEditor = view === "editor";
@@ -623,23 +1102,53 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
   
     openDustBtn.classList.toggle("is-active", isDust);
     openDustBtn.setAttribute("aria-pressed", String(isDust));
+    
+    // Keep state text in sync
+    if (isExplorer) updateExplorerStateText();
+    if (isDust) updateDustStateText();
+    if (isEditor) applyPreviewWide(isPreviewWide);
   }
   
   let msgTimer: number | undefined;
+  let msgHoldUntil = 0;
 
-  function showMessage(text: string, ms = 1800) {
+  function calcMessageDurationMs(text: string): number {
+    const len = text.replace(/\s+/g, " ").trim().length;
+    const auto = 2500 + len * 55;
+    const min = 5000;
+    const max = 20000;
+    return Math.min(max, Math.max(min, auto));
+  }
+
+  function showMessage(text: string, ms?: number) {
+    const duration = ms ?? calcMessageDurationMs(text);
+
     msgText.textContent = text;
+    msgHoldUntil = Date.now() + duration;
+
     if (msgTimer) window.clearTimeout(msgTimer);
     msgTimer = window.setTimeout(() => {
-      // msgText.textContent = state.dirty ? "Unsaved" : "";
+      msgHoldUntil = 0;
       msgText.textContent = activeTab().dirty ? "Unsaved" : "";
-    }, ms);
+    }, duration);
   }
+
+  togglePreviewWideHandler = async () => {
+    if (state.view !== "editor") {
+      showMessage("Preview wide is available in Editor.");
+      return;
+    }
   
+    isPreviewWide = !isPreviewWide;
+    applyPreviewWide(isPreviewWide);
+    showMessage(isPreviewWide ? "Preview: Wide" : "Preview: Split");
+  };
+
   function setDirty(next: boolean) {
-    // state.dirty = next;
     activeTab().dirty = next;
 
+    // メッセージ表示中は "Unsaved" で上書きしない（読み切る時間を確保）
+    if (Date.now() < msgHoldUntil) return;
     msgText.textContent = activeTab().dirty ? "Unsaved" : "";
   }
 
@@ -648,7 +1157,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
 
     const tab = activeTab();
     input.value = tab.text;
-    preview.innerHTML = renderPreviewText(tab.text);
+    // preview.innerHTML = renderPreviewText(tab.text);
+    preview.innerHTML = renderPreviewMarkdown(tab.text);
     if (tab.dirty) msgText.textContent = "Unsaved";
   }
 
@@ -665,9 +1175,10 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
         const created = formatYmd(m.created_at);
         const updated = m.updated_at ? formatYmd(m.updated_at) : created;
         const size = formatBytes(memoSizeBytes(m.content));
+        const id = escapeHtml(m.id);
         return `
-          <li style="border:1px solid #e3e6ea; border-radius:12px; padding:10px; margin-bottom:10px;">
-            <button class="memo-row" data-id="${escapeHtml(m.id)}" type="button" style="all:unset; cursor:pointer; display:block; width:100%;">
+          <li class="memo-item" data-id="${id}" style="border:1px solid #e3e6ea; border-radius:12px; padding:10px; margin-bottom:10px;">
+            <button class="memo-row" data-id="${id}" type="button" style="all:unset; cursor:pointer; display:block; width:100%;">
               <div style="font-weight:700;">${title}</div>
               <div style="font-size:12px; color:#666; margin-top:6px;">
                 <div>Created Date:  ${created}</div>
@@ -693,9 +1204,10 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
         const title = escapeHtml(memoTitleFromContent(m.content));
         const snippet = escapeHtml(memoSnippet(m.content));
         const trashed = formatYmd(m.deleted_at);
+        const id = escapeHtml(m.id);
         return `
-          <li style="border:1px solid #e3e6ea; border-radius:12px; padding:10px; margin-bottom:10px;">
-            <button class="memo-row" data-id="${escapeHtml(m.id)}" type="button"
+          <li class="memo-item" data-id="${id}" style="border:1px solid #e3e6ea; border-radius:12px; padding:10px; margin-bottom:10px;">
+            <button class="memo-row" data-id="${id}" type="button"
               style="all:unset; cursor:pointer; display:block; width:100%;">
               <div style="font-weight:700;">${title}</div>
               <div style="font-size:12px; color:#666; margin-top:6px;">
@@ -786,9 +1298,19 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       listState.textContent = "Loading...";
       const userId = await requireUserId();
       const list = await listMemos({ userId, limit: 50 });
+
       state.memos = list;
-      renderExplorer(getSortedExplorerList(list));
-      listState.textContent = `${list.length} memos · ${sortLabel(state.explorerSortMode)}`;
+
+      const sorted = getSortedExplorerList(list);
+      explorerOrderedIds = sorted.map((m) => m.id);
+
+      pruneSelection(state.explorerSelectedIds, explorerOrderedIds);
+      state.explorerFocusId = ensureFocus(explorerOrderedIds, state.explorerFocusId);
+
+      renderExplorer(sorted);
+      updateExplorerStateText();
+      syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
+      scrollFocusIntoView(memoList, state.explorerFocusId, "auto");
     } catch (e) {
       console.error(e);
       listState.textContent = "Failed to load";
@@ -801,8 +1323,17 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       dustState.textContent = "Loading...";
       const userId = await requireUserId();
       const list = await listDustMemos({ userId, limit: 50 });
+
+      dustTotal = list.length;
+      dustOrderedIds = list.map((m) => m.id);
+
+      pruneSelection(state.dustSelectedIds, dustOrderedIds);
+      state.dustFocusId = ensureFocus(dustOrderedIds, state.dustFocusId);
+
       renderDust(list);
-      dustState.textContent = `${list.length} trashed memos`;
+      updateDustStateText();
+      syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
+      scrollFocusIntoView(dustList, state.dustFocusId, "auto");
     } catch (e) {
       console.error(e);
       dustState.textContent = "Failed to load";
@@ -818,7 +1349,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
   input.addEventListener("input", () => {
     activeTab().text = input.value;
     setDirty(true);
-    preview.innerHTML = renderPreviewText(activeTab().text);
+    // preview.innerHTML = renderPreviewText(activeTab().text);
+    preview.innerHTML = renderPreviewMarkdown(activeTab().text);
     renderTabs();
   });
 
@@ -832,6 +1364,11 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     const btn = target?.closest<HTMLButtonElement>("button.memo-row");
     const id = btn?.dataset.id;
     if (!id) return;
+
+    // Keep a stable keyboard focus point for ↑/↓ and Space
+    state.explorerFocusId = id;
+    syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
+    scrollFocusIntoView(memoList, state.explorerFocusId, "auto");
 
     try {
       // ここは「切替前に保存」したいなら入れる
@@ -860,6 +1397,11 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     const btn = target?.closest<HTMLButtonElement>("button.memo-row");
     const id = btn?.dataset.id;
     if (!id) return;
+    
+    // Keep a stable keyboard focus point for ↑/↓ and Space
+    state.dustFocusId = id;
+    syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
+    scrollFocusIntoView(dustList, state.dustFocusId, "auto");
 
     try {
       const userId = await requireUserId();
@@ -916,6 +1458,77 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
 
   goExplorerHandler = goExplorer;
   goDustHandler = goDust;
+  
+  // keyboard handlers for list focus / selection / open
+  explorerSelectToggleHandler = async () => {
+    if (state.view !== "explorer") return;
+    toggleExplorerSelectionAtFocus();
+  };
+
+  explorerMoveFocusHandler = async (delta: -1 | 1) => {
+    if (state.view !== "explorer") return;
+    ensureExplorerFocus();
+    moveExplorerFocus(delta);
+  };
+
+  explorerOpenFocusHandler = async () => {
+    if (state.view !== "explorer") return;
+    ensureExplorerFocus();
+    const id = state.explorerFocusId;
+    if (!id) return;
+
+    try {
+      await saveIfDirty();
+      const userId = await requireUserId();
+      const memo = await getMemo({ userId, id });
+      if (!memo) return;
+
+      activeTab().currentMemoId = memo.id;
+      activeTab().text = memo.content;
+      setDirty(false);
+
+      renderEditor();
+      renderTabs();
+      setView("editor");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  dustSelectToggleHandler = async () => {
+    if (state.view !== "dust") return;
+    toggleDustSelectionAtFocus();
+  };
+
+  dustMoveFocusHandler = async (delta: -1 | 1) => {
+    if (state.view !== "dust") return;
+    ensureDustFocus();
+    moveDustFocus(delta);
+  };
+  
+  dustOpenFocusHandler = async () => {
+    if (state.view !== "dust") return;
+    ensureDustFocus();
+    const id = state.dustFocusId;
+    if (!id) return;
+
+    try {
+      await saveIfDirty();
+      const userId = await requireUserId();
+      const memo = await getMemo({ userId, id });
+      if (!memo) return;
+
+      activeTab().currentMemoId = memo.id;
+      activeTab().text = memo.content;
+      setDirty(false);
+
+      renderEditor();
+      renderTabs();
+      setView("editor");
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   closeTabHandler = async () => {
     const viewBefore = state.view;
@@ -925,20 +1538,28 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       const title = extractFirstLineTitle(tab.text, TAB_TITLE_MAX);
   
       // 未保存なら保存してから閉じる
-      const needsSave = tab.dirty || (tab.currentMemoId === null && tab.text.trim() !== "");
-      if (needsSave) {
-        const userId = await requireUserId();
+      // const needsSave = tab.dirty || (tab.currentMemoId === null && tab.text.trim() !== "");
+      // if (needsSave) {
+      //   const userId = await requireUserId();
   
-        if (tab.currentMemoId) {
-          await updateMemo({ userId, id: tab.currentMemoId, content: tab.text });
-        } else {
-          const created = await createMemo({ userId, content: tab.text });
-          tab.currentMemoId = created.id;
-        }
+      //   if (tab.currentMemoId) {
+      //     await updateMemo({ userId, id: tab.currentMemoId, content: tab.text });
+      //   } else {
+      //     const created = await createMemo({ userId, content: tab.text });
+      //     tab.currentMemoId = created.id;
+      //   }
   
-        tab.dirty = false;
-      }
+      //   tab.dirty = false;
+      // }
   
+      // 未保存なら保存してから閉じる
+      // 新規タブ（currentMemoId === null）の場合、DEFAULT_TEXTのまま or 白紙なら保存しない
+      const norm = (s: string) => s.replaceAll("\r\n", "\n").trim();
+      const isNew = tab.currentMemoId === null;
+      const isBlankDraft = isNew && norm(tab.text) === "";
+      const isDefaultDraft = isNew && norm(tab.text) === norm(DEFAULT_TEXT);
+      const needsSave = isNew ? (!isBlankDraft && !isDefaultDraft) : tab.dirty;
+
       const idx = state.tabs.findIndex((t) => t.id === tab.id);
       if (idx < 0) return;
   
@@ -951,7 +1572,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
         renderEditor();
         renderTabs();
         setView(viewBefore);
-        if (viewBefore === "editor") input.focus();
+        // if (viewBefore === "editor") input.focus();
+        if (viewBefore === "editor") focusEditorInputIfVisible();
   
         showMessage(needsSave ? `Saved & closed: ${title}` : `Closed: ${title}`);
         return;
@@ -966,7 +1588,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       renderTabs();
       if (viewBefore === "editor") {
         renderEditor();
-        input.focus();
+        // input.focus();
+        focusEditorInputIfVisible();
       }
       setView(viewBefore);
   
@@ -975,14 +1598,94 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       console.error("close tab failed", err);
       showMessage("Oops — close tab failed 😵‍💫", 2500);
     }
-  };  
-
+  }; 
+  
   deleteMemoHandler = async () => {
-    if (state.view !== "editor") {
-      showMessage("Delete is available in Editor.");
+    // Explorer: move selected memos to Dust
+    if (state.view === "explorer") {
+      const count = state.explorerSelectedIds.size;
+      if (count === 0) {
+        showMessage("Select memo(s) with Alt+Shift+Ctrl+Space.");
+        return;
+      }
+
+      const ok = await keyConfirm(`Move ${count} memo${count === 1 ? "" : "s"} to Dust?`);
+      if (!ok) {
+        showMessage("Canceled.");
+        return;
+      }
+
+      try {
+        await autoUpdateIfEditingCurrentMemo();
+        const userId = await requireUserId();
+        // sequential for safety
+        for (const id of Array.from(state.explorerSelectedIds)) {
+          await trashMemo({ userId, id });
+        }
+
+        state.explorerSelectedIds.clear();
+        updateExplorerStateText();
+        showMessage("Moved to Dust 🗑️");
+        await goDust();
+      } catch (err) {
+        console.error("delete failed", err);
+        showMessage("Oops — delete failed 😵‍💫", 2500);
+      }
       return;
     }
-  
+
+    // Dust: erase forever / restore selected memos
+    if (state.view === "dust") {
+      const count = state.dustSelectedIds.size;
+      if (count === 0) {
+        showMessage("Select memo(s) with Alt+Shift+Ctrl+Space.");
+        return;
+      }
+
+      const decision = await keyConfirmDust(
+        `${count} memo${count === 1 ? "" : "s"} selected.\n\nErase forever? (Y)\nRestore to Explorer? (N)`
+      );
+
+      if (decision === "cancel") {
+        showMessage("Canceled.");
+        return;
+      }
+
+      try {
+        const userId = await requireUserId();
+
+        // sequential for safety
+        if (decision === "erase") {
+          for (const id of Array.from(state.dustSelectedIds)) {
+            await hardDeleteMemo({ userId, id });
+          }
+          state.dustSelectedIds.clear();
+          showMessage("Deleted forever 🔥");
+          await loadDust();
+          setView("dust");
+          return;
+        }
+
+        // decision === "restore"
+        for (const id of Array.from(state.dustSelectedIds)) {
+          await restoreMemo({ userId, id });
+        }
+        state.dustSelectedIds.clear();
+        showMessage("Restored ✨");
+        await loadDust();
+        setView("dust");
+      } catch (err) {
+        console.error("dust action failed", err);
+        showMessage("Oops — action failed 😵‍💫", 2500);
+      }
+      return;
+    }
+
+    if (state.view !== "editor") {
+      showMessage("Delete is available in Editor / Explorer / Dust.");
+      return;
+    }
+
     const tab = activeTab();
     if (!tab.currentMemoId) {
       showMessage("Nothing to delete — save the memo first.");
@@ -1054,7 +1757,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     renderTabs();
     // updateEditorTabLabel();
     setView("editor");
-    input.focus();    
+    // input.focus();
+    focusEditorInputIfVisible();
   }
 
   // newTabBtn.addEventListener("click", () => void createNewTab());
@@ -1089,6 +1793,7 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
   deleteMemoHandler = null;
   closeTabHandler = null;
   switchTabHandler = null;
+  togglePreviewWideHandler = null;
 
   app.innerHTML = mountAuthUIHtml;
 
@@ -1159,6 +1864,7 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
 let authMode: "normal" | "recovery" = "normal";
 
 function mountResetPasswordUI(app: HTMLDivElement) {
+
   app.innerHTML = resetPasswordUIHtml;
 
   const msg = qs<HTMLDivElement>("#resetMsg");
