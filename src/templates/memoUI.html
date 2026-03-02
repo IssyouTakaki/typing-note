@@ -21,11 +21,21 @@
         <div id="msgBar" class="msgbar" aria-live="polite" aria-atomic="true">
             <span id="msgText" class="msgtext"></span>
         </div>
+
+
+        <div id="searchBar" class="searchbar" hidden>
+            <input id="searchInput" class="search-input" type="search" placeholder="Search" autocomplete="off" spellcheck="false" />
+            <button id="searchClearBtn" class="search-clear" type="button" aria-label="Clear search" hidden>×</button>
+        </div>
     </div>
   
     <main class="main">
         <section id="editorView" class="view">
             <div class="panes">
+                <div id="presudoTagBar" class="tagbar" hidden>
+                    <div class="tagbar-label">Tags</div>
+                    <div id="pseudoTagList" class="taglist" aria-label="tags"></div>
+                </div>
                 <section class="pane pane-left">
                     <div class="pane-header">Input</div>
                     <textarea id="memoInput" class="textarea" spellcheck="false"></textarea>

@@ -230,7 +230,7 @@ function renderPreviewMarkdown(text: string): string {
 
     // headings (# / ## / ###)
     {
-      const m = line.match(/^(#{1,3})\s*(.+)$/);
+      const m = line.match(/^(#{1,3})\s+(.+)$/);
       if (m) {
         const level = m[1].length as 1 | 2 | 3;
         const content = m[2].trim();
@@ -295,7 +295,9 @@ function renderPreviewText(text: string): string {
 
 function memoTitleFromContent(content: string) {
   const first = content.split("\n")[0]?.trim() ?? "";
-  return first.replace(/^#+\s*/, "").slice(0, 40) || "(no title)";
+  const mh = first.match(/^#{1,6}\s+(.+)$/);
+  const title = (mh ? mh[1] : first).trim();
+  return title.slice(0, 40) || "(no title)";
 }
 
 function memoSnippet(content: string) {
@@ -324,6 +326,30 @@ function formatBytes(bytes: number): string {
   return `${gb.toFixed(1)} GB`;
 }
 
+function extractPseudoTags(text: string): string[] {
+  // Pseudo tags: "#aiueo" (no space after #)
+  // - Exclude headings "# title" (space after #)
+  // - Exclude code blocks / inline code to reduce false positives
+  // - Allow Japanese and common symbols: letters/numbers/_/-
+  const cleaned = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ");
+
+  const map = new Map<string, string>(); // key -> display (first seen)
+  const re = /(^|[^\p{L}\p{N}_\-#])#([\p{L}\p{N}_\-]{1,30})/gu;
+
+  for (const m of cleaned.matchAll(re)) {
+    const raw = m[2];
+    if (!raw) continue;
+
+    // de-dupe case-insensitively for ASCII tags (e.g. AI vs ai)
+    const key = /[A-Za-z]/.test(raw) ? raw.toLowerCase() : raw;
+    if (!map.has(key)) map.set(key, raw);
+  }
+
+  return Array.from(map.values());
+}
+
 
 const TAB_TITLE_MAX = 12;
 const MAX_TABS = 8;
@@ -331,7 +357,8 @@ const MAX_TABS = 8;
 
 function extractFirstLineTitle(text: string, maxLen: number) {
   const first = (text.split("\n")[0] ?? "").trim();
-  const clean = first.replace(/^#+\s*/, "");
+  const mh = first.match(/^#{1,6}\s+(.+)$/);
+  const clean = (mh ? mh[1] : first).trim();
   if (!clean) return "EDITOR";
   return clean.length > maxLen ? clean.slice(0, maxLen) + " ..." : clean;
 }
@@ -692,7 +719,10 @@ function registerSaveShortcut() {
         return;
       }
 
-      if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      const activeEl = document.activeElement;
+      const isSearchTyping = activeEl instanceof HTMLInputElement && activeEl.id === "searchInput";
+
+      if (!isSearchTyping && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
         e.preventDefault();
         const delta: -1 | 1 = e.key === "ArrowUp" ? -1 : 1;
         if (state.view === "explorer") {
@@ -703,7 +733,7 @@ function registerSaveShortcut() {
         return;
       }
 
-      if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "Enter") {
+      if (!isSearchTyping && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "Enter") {
         // Open focused memo only when nothing is selected
         if (state.view === "explorer") {
           if (state.explorerSelectedIds.size === 0 && explorerOpenFocusHandler) {
@@ -805,6 +835,14 @@ function mountMemoUI(app: HTMLDivElement) {
   const preview = qs<HTMLDivElement>("#memoPreview");
   const msgText = qs<HTMLSpanElement>("#msgText");
 
+  // --- pseudo tags (Input) ---
+  const pseudoTagBar = qs<HTMLElement>("#presudoTagBar, #pseudoTagBar");
+  const pseudoTagList = qs<HTMLDivElement>("#pseudoTagList");
+
+  const searchBar = qs<HTMLElement>("#searchBar");
+  const searchInput = qs<HTMLInputElement>("#searchInput");
+  const searchClearBtn = qs<HTMLButtonElement>("#searchClearBtn");
+
   const panes = qs<HTMLDivElement>("#editorView .panes");
 
   const inputPane = input.closest<HTMLElement>(".pane");
@@ -845,13 +883,24 @@ function mountMemoUI(app: HTMLDivElement) {
   let dustOrderedIds: string[] = [];
   let dustTotal = 0;
 
-  const updateExplorerStateText = () => {
-    const base = `${state.memos.length} memos · ${sortLabel(state.explorerSortMode)}`;
-    listState.textContent = `${base} · Selected: ${state.explorerSelectedIds.size}`;
+  // --- Search (Explorer & Dust) ---
+  let explorerQuery = "";
+  let dustQuery = "";
+  let explorerAllSorted: MemoRow[] = [];
+  let dustAll: MemoRow[] = [];
+
+  const updateExplorerStateText = (visibleCount = explorerOrderedIds.length, totalCount = state.memos.length) => {
+    const q = explorerQuery.trim();
+    const base = `${totalCount} memos · ${sortLabel(state.explorerSortMode)} · Showing: ${visibleCount}`;
+    const filter = q ? ` · Filter: "${q}"` : "";
+    listState.textContent = `${base}${filter} · Selected: ${state.explorerSelectedIds.size}`;
   };
 
-  const updateDustStateText = () => {
-    dustState.textContent = `${dustTotal} trashed memos · Selected: ${state.dustSelectedIds.size}`;
+  const updateDustStateText = (visibleCount = dustOrderedIds.length, totalCount = dustTotal) => {
+    const q = dustQuery.trim();
+    const base = `${totalCount} trashed memos · Showing: ${visibleCount}`;
+    const filter = q ? ` · Filter: "${q}"` : "";
+    dustState.textContent = `${base}${filter} · Selected: ${state.dustSelectedIds.size}`;
   };
 
   const syncListClasses = (ul: HTMLUListElement, focusId: string | null, selected: Set<string>) => {
@@ -1068,6 +1117,34 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     void activateTab(tabId);
   });
   
+
+  function syncSearchUi() {
+    const isExplorer = state.view === "explorer";
+    const isDust = state.view === "dust";
+    const show = isExplorer || isDust;
+
+    if (!show) {
+      if (document.activeElement === searchInput) searchInput.blur();
+      searchBar.hidden = true;
+      searchInput.disabled = true;
+      searchClearBtn.hidden = true;
+      return;
+    }
+
+    searchBar.hidden = false;
+    searchInput.disabled = false;
+
+    if (isExplorer) {
+      searchInput.placeholder = "Search in Explorer...";
+      searchInput.value = explorerQuery;
+    } else {
+      searchInput.placeholder = "Search in Dust...";
+      searchInput.value = dustQuery;
+    }
+
+    searchClearBtn.hidden = searchInput.value.trim().length === 0;
+  }
+
   function setView(view: ViewMode) {
     const prev = state.view;
 
@@ -1088,6 +1165,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     }
 
     state.view = view;
+
+    syncSearchUi();
   
     const isEditor = view === "editor";
     const isExplorer = view === "explorer";
@@ -1152,6 +1231,43 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     msgText.textContent = activeTab().dirty ? "Unsaved" : "";
   }
 
+
+  // --- pseudo tags: extract from input text and show as chips ---
+  const renderPseudoTags = (text: string) => {
+    const tags = extractPseudoTags(text);
+
+    if (tags.length === 0) {
+      pseudoTagBar.hidden = true;
+      pseudoTagList.innerHTML = "";
+      return;
+    }
+
+    pseudoTagBar.hidden = false;
+    pseudoTagList.innerHTML = tags
+      .map((t) => {
+        const esc = escapeHtml(t);
+        return `<button class="tagchip" type="button" data-tag="${esc}">#${esc}</button>`;
+      })
+      .join("");
+  };
+
+  // Click a tag chip to copy "#tag" (safe / no state changes)
+  pseudoTagList.addEventListener("click", (ev) => {
+    const target = ev.target as HTMLElement | null;
+    const btn = target?.closest<HTMLButtonElement>("button.tagchip");
+    const tag = btn?.dataset.tag;
+    if (!tag) return;
+
+    const text = `#${tag}`;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => showMessage(`Copied ${text}`),
+        () => showMessage(`Tag: ${text}`)
+      );
+    } else {
+      showMessage(`Tag: ${text}`);
+    }
+  });
   // ---- renderers
   function renderEditor() {
 
@@ -1160,6 +1276,7 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     // preview.innerHTML = renderPreviewText(tab.text);
     preview.innerHTML = renderPreviewMarkdown(tab.text);
     if (tab.dirty) msgText.textContent = "Unsaved";
+    renderPseudoTags(tab.text);
   }
 
   function renderExplorer(list: MemoRow[]) {
@@ -1293,6 +1410,61 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
   }
 
 
+
+  const normalizeQuery = (q: string) => q.trim().toLowerCase();
+
+  const memoMatchesQuery = (m: MemoRow, q: string) => {
+    if (!q) return true;
+    const hay = (m.content ?? "").toLowerCase();
+    return hay.includes(q);
+  };
+
+  const applyExplorerRender = (behavior: ScrollBehavior = "auto") => {
+    const q = normalizeQuery(explorerQuery);
+    const base = explorerAllSorted;
+    const filtered = q ? base.filter((m) => memoMatchesQuery(m, q)) : base;
+
+    explorerOrderedIds = filtered.map((m) => m.id);
+
+    pruneSelection(state.explorerSelectedIds, explorerOrderedIds);
+    state.explorerFocusId = ensureFocus(explorerOrderedIds, state.explorerFocusId);
+
+    if (filtered.length === 0) {
+      memoList.innerHTML = q
+        ? `<li style="padding:10px; color:#666;">(no matches)</li>`
+        : `<li style="padding:10px; color:#666;">(empty)</li>`;
+    } else {
+      renderExplorer(filtered);
+    }
+
+    updateExplorerStateText(filtered.length, base.length);
+    syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
+    scrollFocusIntoView(memoList, state.explorerFocusId, behavior);
+  };
+
+  const applyDustRender = (behavior: ScrollBehavior = "auto") => {
+    const q = normalizeQuery(dustQuery);
+    const base = dustAll;
+    const filtered = q ? base.filter((m) => memoMatchesQuery(m, q)) : base;
+
+    dustOrderedIds = filtered.map((m) => m.id);
+
+    pruneSelection(state.dustSelectedIds, dustOrderedIds);
+    state.dustFocusId = ensureFocus(dustOrderedIds, state.dustFocusId);
+
+    if (filtered.length === 0) {
+      dustList.innerHTML = q
+        ? `<li style="padding:10px; color:#666;">(no matches)</li>`
+        : `<li style="padding:10px; color:#666;">(empty)</li>`;
+    } else {
+      renderDust(filtered);
+    }
+
+    updateDustStateText(filtered.length, dustTotal);
+    syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
+    scrollFocusIntoView(dustList, state.dustFocusId, behavior);
+  };
+
   async function loadExplorer() {
     try {
       listState.textContent = "Loading...";
@@ -1301,16 +1473,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
 
       state.memos = list;
 
-      const sorted = getSortedExplorerList(list);
-      explorerOrderedIds = sorted.map((m) => m.id);
-
-      pruneSelection(state.explorerSelectedIds, explorerOrderedIds);
-      state.explorerFocusId = ensureFocus(explorerOrderedIds, state.explorerFocusId);
-
-      renderExplorer(sorted);
-      updateExplorerStateText();
-      syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
-      scrollFocusIntoView(memoList, state.explorerFocusId, "auto");
+      explorerAllSorted = getSortedExplorerList(list);
+      applyExplorerRender("auto");
     } catch (e) {
       console.error(e);
       listState.textContent = "Failed to load";
@@ -1324,16 +1488,10 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       const userId = await requireUserId();
       const list = await listDustMemos({ userId, limit: 50 });
 
+      dustAll = list;
       dustTotal = list.length;
-      dustOrderedIds = list.map((m) => m.id);
 
-      pruneSelection(state.dustSelectedIds, dustOrderedIds);
-      state.dustFocusId = ensureFocus(dustOrderedIds, state.dustFocusId);
-
-      renderDust(list);
-      updateDustStateText();
-      syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
-      scrollFocusIntoView(dustList, state.dustFocusId, "auto");
+      applyDustRender("auto");
     } catch (e) {
       console.error(e);
       dustState.textContent = "Failed to load";
@@ -1346,11 +1504,48 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
   renderTabs();
 
 
+  // ---- wire search (Explorer & Dust)
+  searchInput.addEventListener("input", () => {
+    const v = searchInput.value;
+
+    if (state.view === "explorer") {
+      explorerQuery = v;
+      applyExplorerRender("auto");
+    } else if (state.view === "dust") {
+      dustQuery = v;
+      applyDustRender("auto");
+    }
+
+    searchClearBtn.hidden = v.trim().length === 0;
+  });
+
+  searchClearBtn.addEventListener("click", () => {
+    searchInput.value = "";
+    searchInput.dispatchEvent(new Event("input"));
+    searchInput.focus();
+  });
+
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+
+    if (searchInput.value.trim().length > 0) {
+      e.preventDefault();
+      searchInput.value = "";
+      searchInput.dispatchEvent(new Event("input"));
+      return;
+    }
+
+    // empty: leave search
+    searchInput.blur();
+  });
+
+
   input.addEventListener("input", () => {
     activeTab().text = input.value;
     setDirty(true);
     // preview.innerHTML = renderPreviewText(activeTab().text);
     preview.innerHTML = renderPreviewMarkdown(activeTab().text);
+    renderPseudoTags(input.value);
     renderTabs();
   });
 
@@ -1732,11 +1927,12 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     // まだ未ロードなら読み込む（空配列のまま押された時用）
     if (state.memos.length === 0) {
       await loadExplorer();
-      // loadExplorer 内で render 済みだが、念のため現在modeで再描画
-      renderExplorer(getSortedExplorerList(state.memos));
-    } else {
-      renderExplorer(getSortedExplorerList(state.memos));
+      showMessage(sortLabel(state.explorerSortMode));
+      return;
     }
+
+    explorerAllSorted = getSortedExplorerList(state.memos);
+    applyExplorerRender("auto");
   
     showMessage(sortLabel(state.explorerSortMode));
   };

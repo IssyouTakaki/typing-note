@@ -10,10 +10,14 @@ git commit -m "feat: sort system"
 git switch -c backup/msgBar;selectableMemoList-20260225
 git commit -m "feat: selectableMemoList, msgBar"
 
+git switch -c backup/ViewMode-20260226
+git commit -m "feat: ViewMode"
+
 git tag multitabs-20260206
 git tag dusttabs-20260212
 git tag sort-20260219
 git tag selectable-20260225
+git tag viewmode-20260226
 
 
 
