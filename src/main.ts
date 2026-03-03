@@ -839,6 +839,8 @@ function mountMemoUI(app: HTMLDivElement) {
   const pseudoTagBar = qs<HTMLElement>("#presudoTagBar, #pseudoTagBar");
   const pseudoTagList = qs<HTMLDivElement>("#pseudoTagList");
 
+  const tagSuggest = qs<HTMLDivElement>("#tagSuggest");
+
   const searchBar = qs<HTMLElement>("#searchBar");
   const searchInput = qs<HTMLInputElement>("#searchInput");
   const searchClearBtn = qs<HTMLButtonElement>("#searchClearBtn");
@@ -1268,6 +1270,252 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       showMessage(`Tag: ${text}`);
     }
   });
+
+
+// --- Tag suggestions (autocomplete) ---
+type TagEntry = { key: string; display: string; count: number; lastSeen: number };
+
+const normalizeTagKey = (s: string) => (/[A-Za-z]/.test(s) ? s.toLowerCase() : s);
+
+let tagDict: TagEntry[] = [];
+let tagDictBuiltAt = 0;
+
+const rebuildTagDict = () => {
+  const map = new Map<string, TagEntry>();
+
+  const addFromText = (text: string, ts: number) => {
+    for (const raw of extractPseudoTags(text)) {
+      const key = normalizeTagKey(raw);
+      const prev = map.get(key);
+      if (!prev) {
+        map.set(key, { key, display: raw, count: 1, lastSeen: ts });
+      } else {
+        prev.count += 1;
+        if (ts > prev.lastSeen) prev.lastSeen = ts;
+      }
+    }
+  };
+
+  const now = Date.now();
+  // Explorer memos
+  for (const m of state.memos) {
+    const t = Date.parse(m.updated_at ?? m.created_at) || now;
+    addFromText(m.content ?? "", t);
+  }
+  // Dust memos (if already loaded)
+  for (const m of dustAll) {
+    const t = Date.parse(m.updated_at ?? m.created_at) || now;
+    addFromText(m.content ?? "", t);
+  }
+  // Open tabs (unsaved tags should still be suggested)
+  for (const t of state.tabs) addFromText(t.text ?? "", now);
+
+  tagDict = Array.from(map.values()).sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    if (b.lastSeen !== a.lastSeen) return b.lastSeen - a.lastSeen;
+    return a.display.localeCompare(b.display);
+  });
+
+  tagDictBuiltAt = now;
+};
+
+const suggestTags = (prefixRaw: string, limit = 8): TagEntry[] => {
+  if (!tagDictBuiltAt) rebuildTagDict();
+  const prefix = normalizeTagKey(prefixRaw);
+  if (!prefix) return tagDict.slice(0, limit);
+  const out: TagEntry[] = [];
+  for (const t of tagDict) {
+    if (t.key.startsWith(prefix)) out.push(t);
+    if (out.length >= limit) break;
+  }
+  return out;
+};
+
+const findActiveTagToken = (value: string, cursor: number): { hashPos: number; prefix: string } | null => {
+  if (cursor <= 0) return null;
+
+  // Walk left over allowed tag chars
+  let i = cursor - 1;
+  while (i >= 0) {
+    const ch = value[i];
+    if (/[\p{L}\p{N}_-]/u.test(ch)) {
+      i -= 1;
+      continue;
+    }
+    break;
+  }
+
+  if (i < 0 || value[i] !== "#") return null;
+  const hashPos = i;
+
+  // "# aiueo" is heading; do not suggest
+  const afterHash = value[hashPos + 1] ?? "";
+  if (afterHash === "" || /\s/.test(afterHash)) return null;
+
+  // avoid matching inside a word: "abc#tag"
+  const before = hashPos > 0 ? value[hashPos - 1] : "";
+  if (before && /[\p{L}\p{N}_-]/u.test(before)) return null;
+
+  const prefix = value.slice(hashPos + 1, cursor);
+  return { hashPos, prefix };
+};
+
+let suggestItems: TagEntry[] = [];
+let suggestIndex = 0;
+let suppressSuggestOnce = false;
+
+const closeTagSuggest = () => {
+  tagSuggest.hidden = true;
+  tagSuggest.innerHTML = "";
+  suggestItems = [];
+  suggestIndex = 0;
+};
+
+const renderTagSuggest = () => {
+  if (suggestItems.length === 0) {
+    closeTagSuggest();
+    return;
+  }
+
+  tagSuggest.hidden = false;
+  tagSuggest.innerHTML = suggestItems
+    .map((t, idx) => {
+      const esc = escapeHtml(t.display);
+      const active = idx === suggestIndex ? " is-active" : "";
+      return `<button class="tag-suggest-item${active}" type="button" role="option" aria-selected="${idx === suggestIndex}" data-idx="${idx}" data-tag="${esc}"><span>#${esc}</span><span class="tag-suggest-hint">Tab/Enter</span></button>`;
+    })
+    .join("");
+};
+
+const applyTagSuggestion = (entry: TagEntry) => {
+  const cursor = input.selectionStart ?? 0;
+  const found = findActiveTagToken(input.value, cursor);
+  if (!found) return;
+
+  const start = found.hashPos;
+  const end = cursor;
+
+  const v = input.value;
+  const tail = v.slice(end);
+
+  // Insert the chosen tag. Also add a trailing space to "finish" the token so
+  // the suggest popup won't immediately reopen on keyup.
+  const core = `#${entry.display}`;
+  const needsSpace = tail.length === 0 ? true : !/^\s/.test(tail);
+  const ins = core + (needsSpace ? " " : "");
+
+  input.value = v.slice(0, start) + ins + v.slice(end);
+  const newPos = start + ins.length;
+  input.setSelectionRange(newPos, newPos);
+
+  // trigger normal render pipeline
+  suppressSuggestOnce = true;
+  input.dispatchEvent(new Event("input"));
+  closeTagSuggest();
+
+  // Allow suggestions again on next tick (prevents immediate reopen on Enter)
+  window.setTimeout(() => {
+    suppressSuggestOnce = false;
+  }, 0);
+};
+
+
+const updateTagSuggest = () => {
+  if (state.view !== "editor") {
+    closeTagSuggest();
+    return;
+  }
+
+  if (suppressSuggestOnce) {
+    closeTagSuggest();
+    return;
+  }
+
+  const cursor = input.selectionStart ?? 0;
+  const found = findActiveTagToken(input.value, cursor);
+  if (!found) {
+    closeTagSuggest();
+    return;
+  }
+
+  // Show suggestions when user typed at least 1 char after '#'
+  if (found.prefix.trim().length < 1) {
+    closeTagSuggest();
+    return;
+  }
+
+  // Rebuild occasionally (cheap, but avoid per-keystroke rebuild)
+  if (Date.now() - tagDictBuiltAt > 10_000) rebuildTagDict();
+
+  const items = suggestTags(found.prefix, 8);
+  if (items.length === 0) {
+    closeTagSuggest();
+    return;
+  }
+
+  suggestItems = items;
+  suggestIndex = Math.min(suggestIndex, suggestItems.length - 1);
+  renderTagSuggest();
+};
+
+// Keep textarea focus when clicking suggestions
+tagSuggest.addEventListener("mousedown", (e) => e.preventDefault());
+
+tagSuggest.addEventListener("click", (ev) => {
+  const target = ev.target as HTMLElement | null;
+  const btn = target?.closest<HTMLButtonElement>("button.tag-suggest-item");
+  const idxStr = btn?.dataset.idx;
+  if (idxStr == null) return;
+  const idx = Number(idxStr);
+  const entry = suggestItems[idx];
+  if (!entry) return;
+  applyTagSuggestion(entry);
+});
+
+input.addEventListener("blur", () => closeTagSuggest());
+
+input.addEventListener("keydown", (e) => {
+  if (tagSuggest.hidden) return;
+
+  // Don't interfere with IME composition
+  if ((e as any).isComposing) return;
+
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    e.stopPropagation();
+    suggestIndex = Math.min(suggestIndex + 1, suggestItems.length - 1);
+    renderTagSuggest();
+    return;
+  }
+  if (e.key === "ArrowUp") {
+    e.preventDefault();
+    e.stopPropagation();
+    suggestIndex = Math.max(suggestIndex - 1, 0);
+    renderTagSuggest();
+    return;
+  }
+  if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const entry = suggestItems[suggestIndex];
+    if (entry) applyTagSuggestion(entry);
+    else closeTagSuggest();
+
+    return;
+  }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    closeTagSuggest();
+    return;
+  }
+});
+
+
+// Update suggestions when caret moves (←/→) or user clicks inside textarea
+input.addEventListener("keyup", () => updateTagSuggest());
+input.addEventListener("click", () => updateTagSuggest());
   // ---- renderers
   function renderEditor() {
 
@@ -1475,6 +1723,7 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
 
       explorerAllSorted = getSortedExplorerList(list);
       applyExplorerRender("auto");
+      rebuildTagDict();
     } catch (e) {
       console.error(e);
       listState.textContent = "Failed to load";
@@ -1492,6 +1741,7 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       dustTotal = list.length;
 
       applyDustRender("auto");
+      rebuildTagDict();
     } catch (e) {
       console.error(e);
       dustState.textContent = "Failed to load";
@@ -1548,6 +1798,9 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     renderPseudoTags(input.value);
     renderTabs();
   });
+
+  // Tag autocomplete
+  input.addEventListener("input", () => updateTagSuggest());
 
   // ---- wire explorer
   // reloadBtn.addEventListener("click", async () => {

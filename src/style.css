@@ -318,6 +318,12 @@ body {
   background: #fbfbfc;
 }
 
+
+/* Input pane: anchor for tag suggestion popup */
+.pane-left{
+  position: relative;
+}
+
 /* --- Pseudo Tags (Input) --- */
 .panes > .tagbar{
   grid-column: 1 / -1;
@@ -369,6 +375,57 @@ body {
 
 .tagchip:hover{
   background: #eef1f4;
+}
+
+
+
+/* --- Tag suggestions (pseudo-tag autocomplete) --- */
+.tag-suggest{
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 44px;              /* below header */
+  z-index: 30;
+
+  background: #ffffff;
+  border: 1px solid #e3e6ea;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.10);
+
+  padding: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.tag-suggest-item{
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+
+  font-size: 13px;
+}
+
+.tag-suggest-item:hover{
+  background: rgba(0,0,0,0.06);
+}
+
+.tag-suggest-item.is-active{
+  background: rgba(11, 87, 208, 0.12);
+  outline: 2px solid rgba(11, 87, 208, 0.18);
+}
+
+.tag-suggest-hint{
+  margin-left: auto;
+  font-size: 11px;
+  color: #666;
 }
 
 
