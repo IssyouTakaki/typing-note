@@ -288,10 +288,10 @@ function renderPreviewMarkdown(text: string): string {
   return `<div class="md-preview">${parts.join("\n")}</div>`;
 }
 
-function renderPreviewText(text: string): string {
-  const escaped = escapeHtml(text);
-  return `<pre class="preview-pre">${escaped}</pre>`;
-}
+// function renderPreviewText(text: string): string {
+//   const escaped = escapeHtml(text);
+//   return `<pre class="preview-pre">${escaped}</pre>`;
+// }
 
 function memoTitleFromContent(content: string) {
   const first = content.split("\n")[0]?.trim() ?? "";
@@ -2205,19 +2205,19 @@ input.addEventListener("click", () => updateTagSuggest());
 
   openDustBtn.addEventListener("click", () => void goDust());
 
-  async function newDraft() {
+  // async function newDraft() {
 
-    await saveIfDirty();
-    activeTab().currentMemoId = null;
-    activeTab().text = "";
-    setDirty(false);
-    renderEditor();
-    renderTabs();
-    // updateEditorTabLabel();
-    setView("editor");
-    // input.focus();
-    focusEditorInputIfVisible();
-  }
+  //   await saveIfDirty();
+  //   activeTab().currentMemoId = null;
+  //   activeTab().text = "";
+  //   setDirty(false);
+  //   renderEditor();
+  //   renderTabs();
+  //   // updateEditorTabLabel();
+  //   setView("editor");
+  //   // input.focus();
+  //   focusEditorInputIfVisible();
+  // }
 
   // newTabBtn.addEventListener("click", () => void createNewTab());
 
