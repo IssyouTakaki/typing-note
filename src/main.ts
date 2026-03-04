@@ -374,6 +374,8 @@ let closeTabHandler: (() => Promise<void>) | null = null;
 let switchTabHandler: ((digit: number) => Promise<void>) | null = null;
 let togglePreviewWideHandler: (() => Promise<void>) | null = null;
 
+let renderTabsHandler: (() => void) | null = null;
+
 // --- List focus / multi-select (Explorer & Dust) ---
 let explorerSelectToggleHandler: (() => Promise<void>) | null = null;
 let explorerMoveFocusHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
@@ -653,6 +655,7 @@ async function autoUpdateIfEditingCurrentMemo(): Promise<AutoUpdateResult> {
 
   await updateMemo ({userId, id: tab.currentMemoId, content: tab.text});
   tab.dirty = false;
+  renderTabsHandler?.();
   return "updated";
 }
 
@@ -667,12 +670,14 @@ async function saveIfDirty(): Promise<SaveResult> {
   if (tab.currentMemoId) {
     await updateMemo({userId, id: tab.currentMemoId, content: tab.text});
     tab.dirty = false;
+    renderTabsHandler?.();
     return "updated";
   } else {
 
     const created = await createMemo({userId, content: tab.text});
     tab.currentMemoId = created.id;
     tab.dirty = false;
+    renderTabsHandler?.();
     return "created";
   }
 }
@@ -1087,8 +1092,11 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       `;
     })
     .join("");
-  }  
+  }
   
+    // expose to global shortcuts (save / auto-update) to refresh the "*" mark
+  renderTabsHandler = renderTabs;
+
   async function activateTab(tabId: string) {
     // タブ切替時に「保存したい」ならここに saveIfDirty() を入れる
     state.activeTabId = tabId;
@@ -1802,6 +1810,7 @@ input.addEventListener("click", () => updateTagSuggest());
   // Tag autocomplete
   input.addEventListener("input", () => updateTagSuggest());
 
+
   // ---- wire explorer
   // reloadBtn.addEventListener("click", async () => {
   //   await loadExplorer();
@@ -2243,6 +2252,7 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
   closeTabHandler = null;
   switchTabHandler = null;
   togglePreviewWideHandler = null;
+  renderTabsHandler = null;
 
   app.innerHTML = mountAuthUIHtml;
 
