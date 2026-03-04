@@ -597,7 +597,7 @@ function qs<T extends Element>(selector: string): T {
 }
 
 let msgTimer: number | undefined;
-let msgHoldUntil = 0;
+// let msgHoldUntil = 0;
 
 function calcMessageDurationMs(text: string): number {
   // 文字数が長いほど表示時間を伸ばす（短文は最低でも少し長め）
@@ -613,11 +613,11 @@ function showMessage(text: string, ms?: number) {
   const duration = ms ?? calcMessageDurationMs(text);
 
   msgText.textContent = text;
-  msgHoldUntil = Date.now() + duration;
+  // msgHoldUntil = Date.now() + duration;
 
   if (msgTimer) window.clearTimeout(msgTimer);
   msgTimer = window.setTimeout(() => {
-    msgHoldUntil = 0;
+    // msgHoldUntil = 0;
     msgText.textContent = activeTab().dirty ? "Unsaved" : "";
   }, duration);
 }
