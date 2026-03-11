@@ -1,35 +1,34 @@
-<div class="layout" style="justify-content:center; align-items:center;">
-    <form id="authForm" style="width:min(420px, 92vw); background:#fff; border:1px solid #e3e6ea; border-radius:12px; padding:16px;" autocomplete="on">
-        <div style="font-weight:700; font-size:16px; margin-bottom:8px;">TypingNote Login</div>
+<div class="layout auth-layout">
+    <form id="authForm" class="auth-card" autocomplete="on">
+        <div id="authTitle" class="auth-title">TypingNote Account</div>
 
-        <div style="font-size:12px; color:#666; margin-bottom:12px;">
-            サインアップ後、確認メールのリンクを開いてからログインしてください（メール確認必須）
+        <div id="authHelp" class="auth-help">
+            アカウント作成後、確認メールのリンクを開いてからサインインしてください（メール確認必須）
         </div>
 
-        <!-- TS側がここに message を入れる -->
-        <div id="authMsg" style="white-space:pre-wrap; font-size:12px; color:#b00020; margin-bottom:10px;" hidden></div>
+        <div id="authMsg" class="auth-msg" hidden></div>
 
-        <label style="display:block; font-size:12px; margin-bottom:6px;">Email</label>
-        <input id="email" type="email" autocomplete="email" style="width:100%; padding:10px; border:1px solid #e3e6ea; border-radius:10px; margin-bottom:10px;" />
+        <label class="auth-label">Email</label>
+        <input id="email" class="auth-input" type="email" autocomplete="email" />
 
-        <label style="display:block; font-size:12px; margin-bottom:6px;">Password</label>
-        <input id="password" type="password" autocomplete="current-password" style="width:100%; padding:10px; border:1px solid #e3e6ea; border-radius:10px; margin-bottom:12px;" />
+        <label class="auth-label">Password</label>
+        <input id="password" class="auth-input" type="password" autocomplete="current-password" />
 
-        <div style="display:flex; gap:10px;">
-        <button id="signupBtn" type="button" style="flex:1; padding:10px; border-radius:10px; border:1px solid #e3e6ea; background:#fff;">
-            Sign up
-        </button>
+        <div class="auth-actions">
+            <button id="signupBtn" class="auth-btn auth-btn-secondary" type="button">
+                Sign up
+            </button>
 
-        <button id="signinBtn" type="submit" style="flex:1; padding:10px; border-radius:10px; border:1px solid #111; background:#111; color:#fff;">
-            Sign in
-        </button>
+            <button id="signinBtn" class="auth-btn auth-btn-primary" type="submit">
+                Sign in
+            </button>
         </div>
 
-        <button id="forgotBtn" class="auth-btn" type="button">Forgot password</button>
+        <button id="forgotBtn" class="auth-btn auth-btn-link" type="button">パスワードをお忘れですか？</button>
+        <button id="backToTopBtn" class="auth-btn auth-btn-link" type="button">TypingNote に戻る</button>
 
-        <div style="font-size:12px; color:#666; margin-top:12px;">
+        <div class="auth-note">
             ※メールが届かない場合は、Supabase → Authentication → Users で確認状態を見直してください。
         </div>
     </form>
 </div>
-  

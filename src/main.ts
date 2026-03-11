@@ -384,7 +384,7 @@ let dustSelectToggleHandler: (() => Promise<void>) | null = null;
 let dustMoveFocusHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
 let dustOpenFocusHandler: (() => Promise<void>) | null = null;
 
-
+let teardownPanesResize: (() => void) | null = null;
 
 function isSaveShortcut(e: KeyboardEvent) {
   const keyRow = e.key;
@@ -514,6 +514,56 @@ function keyConfirm(message: string): Promise<boolean> {
 
 type DustDecision = "erase" | "restore" | "cancel";
 
+function keyConfirmSignUp(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "key-confirm-overlay";
+
+    const card = document.createElement("div");
+    card.className = "key-confirm";
+
+    const title = document.createElement("div");
+    title.className = "key-confirm-title";
+    title.textContent = "Account required";
+
+    const body = document.createElement("div");
+    body.className = "key-confirm-body";
+    body.textContent = message;
+
+    const hint = document.createElement("div");
+    hint.className = "key-confirm-hint";
+    hint.textContent = "Press Y to open Sign up / N to close";
+
+    card.append(title, body, hint);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      const k = typeof e.key === "string" ? e.key.toLowerCase() : "";
+      if (k !== "y" && k !== "n" && k !== "escape") return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+      resolve(k === "y");
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      overlay.remove();
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target !== overlay) return;
+      cleanup();
+      resolve(false);
+    });
+  });
+}
+
 function keyConfirmDust(message: string): Promise<DustDecision> {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
@@ -629,7 +679,7 @@ async function requireUserId(): Promise<string> {
   return userId;
 }
 
-type SaveResult = "noop" | "created" | "updated";
+type SaveResult = "noop" | "created" | "updated" | "auth_required";
 
 type AutoUpdateResult = "noop" | "updated";
 
@@ -665,7 +715,19 @@ async function saveIfDirty(): Promise<SaveResult> {
   const tab = activeTab();
   if (!tab.dirty) return "noop";
 
-  const userId = await requireUserId();
+  const session = await getSession();
+  const userId = session?.user.id ?? null;
+
+  if (!userId) {
+    const goSignup = await keyConfirmSignUp(
+      "未ログインのため保存できません。\n\nアカウントを作成しますか？"
+    );
+
+    if (goSignup) {
+      openAccountScreen("signup");
+    }
+    return "auth_required";
+  }
 
   if (tab.currentMemoId) {
     await updateMemo({userId, id: tab.currentMemoId, content: tab.text});
@@ -806,6 +868,7 @@ function registerSaveShortcut() {
 
       if (result === "updated") showMessage("Updated ✨");
       else if (result === "created") showMessage("Created a new memo 🚀");
+      else if (result === "auth_required") showMessage("保存にはアカウント作成またはサインインが必要です。", 4500);
       else showMessage("Nothing to save - you're all set.");
     } catch (err) {
       console.error("save failed", err);
@@ -818,11 +881,13 @@ function registerSaveShortcut() {
 }
 
 function mountMemoUI(app: HTMLDivElement) {
+  appScreen = "memo";
   app.innerHTML = memoUIHtml;
 
   // ---- elements
   const logoutBtn = qs<HTMLButtonElement>("#logoutBtn");
-  // const editorTabBtn = qs<HTMLButtonElement>("#editorTabBtn");
+  const signinBtn = qs<HTMLButtonElement>("#signinBtn");
+  const signupBtn = qs<HTMLButtonElement>("#signupBtn");
   const tabList = qs<HTMLDivElement>("#tabList");
   const openExplorerBtn = qs<HTMLButtonElement>("#openExplorerBtn");
   const newTabBtn = qs<HTMLButtonElement>("#newTabBtn");
@@ -840,6 +905,19 @@ function mountMemoUI(app: HTMLDivElement) {
   const preview = qs<HTMLDivElement>("#memoPreview");
   const msgText = qs<HTMLSpanElement>("#msgText");
 
+  const refreshHeaderAuthUi = async () => {
+    const session = await getSession();
+    const loggedIn = !!session;
+
+    logoutBtn.hidden = !loggedIn;
+    signinBtn.hidden = loggedIn;
+    signupBtn.hidden = loggedIn;
+
+    logoutBtn.disabled = !loggedIn;
+    signinBtn.disabled = loggedIn;
+    signupBtn.disabled = loggedIn;
+  };
+
   // --- pseudo tags (Input) ---
   const pseudoTagBar = qs<HTMLElement>("#presudoTagBar, #pseudoTagBar");
   const pseudoTagList = qs<HTMLDivElement>("#pseudoTagList");
@@ -851,6 +929,26 @@ function mountMemoUI(app: HTMLDivElement) {
   const searchClearBtn = qs<HTMLButtonElement>("#searchClearBtn");
 
   const panes = qs<HTMLDivElement>("#editorView .panes");
+
+  // 既存の resize 監視があれば解除（rerender対策）
+  teardownPanesResize?.();
+  teardownPanesResize = null;
+
+  const syncPanesHeight = () => {
+    const top = panes.getBoundingClientRect().top;
+    const h = Math.max(240, window.innerHeight - top); // 下限は好みで
+    panes.style.height = `${h}px`;
+    panes.style.flex = "0 0 auto"; // height を優先させる
+  };
+
+  // 初回
+  syncPanesHeight();
+
+  // リサイズ時
+  window.addEventListener("resize", syncPanesHeight);
+  teardownPanesResize = () => {
+    window.removeEventListener("resize", syncPanesHeight);
+  };
 
   const inputPane = input.closest<HTMLElement>(".pane");
   if (!inputPane) throw new Error("input pane not found");
@@ -1196,6 +1294,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     if (isExplorer) updateExplorerStateText();
     if (isDust) updateDustStateText();
     if (isEditor) applyPreviewWide(isPreviewWide);
+
+    if (isEditor) syncPanesHeight();
   }
   
   let msgTimer: number | undefined;
@@ -1245,14 +1345,15 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
   // --- pseudo tags: extract from input text and show as chips ---
   const renderPseudoTags = (text: string) => {
     const tags = extractPseudoTags(text);
-
+  
+    // 常時表示
+    pseudoTagBar.hidden = false;
+  
     if (tags.length === 0) {
-      pseudoTagBar.hidden = true;
       pseudoTagList.innerHTML = "";
       return;
     }
-
-    pseudoTagBar.hidden = false;
+  
     pseudoTagList.innerHTML = tags
       .map((t) => {
         const esc = escapeHtml(t);
@@ -1260,7 +1361,7 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       })
       .join("");
   };
-
+  
   // Click a tag chip to copy "#tag" (safe / no state changes)
   pseudoTagList.addEventListener("click", (ev) => {
     const target = ev.target as HTMLElement | null;
@@ -1898,6 +1999,13 @@ input.addEventListener("click", () => updateTagSuggest());
   });
 
   async function goExplorer() {
+    const session = await getSession();
+    if (!session) {
+      showMessage("Explorer を使うには Sign in が必要です。", 4500);
+      openAccountScreen("signin");
+      return;
+    }
+
     const r = await autoUpdateIfEditingCurrentMemo();
   
     setView("explorer");
@@ -1907,6 +2015,13 @@ input.addEventListener("click", () => updateTagSuggest());
   }  
 
   async function goDust() {
+    const session = await getSession();
+    if (!session) {
+      showMessage("Dust を使うには Sign in が必要です。", 4500);
+      openAccountScreen("signin");
+      return;
+    }
+
     const r = await autoUpdateIfEditingCurrentMemo();
     setView("dust");
     showMessage(r === "updated" ? "Updated ✨ — Dust opened" : "Dust opened");
@@ -2199,48 +2314,82 @@ input.addEventListener("click", () => updateTagSuggest());
     showMessage(sortLabel(state.explorerSortMode));
   };
   
-
-  // editorTabBtn.addEventListener("click", () => setView("editor"));
   openExplorerBtn.addEventListener("click", () => void goExplorer());
 
   openDustBtn.addEventListener("click", () => void goDust());
-
-  // async function newDraft() {
-
-  //   await saveIfDirty();
-  //   activeTab().currentMemoId = null;
-  //   activeTab().text = "";
-  //   setDirty(false);
-  //   renderEditor();
-  //   renderTabs();
-  //   // updateEditorTabLabel();
-  //   setView("editor");
-  //   // input.focus();
-  //   focusEditorInputIfVisible();
-  // }
-
-  // newTabBtn.addEventListener("click", () => void createNewTab());
 
   newTabBtn.addEventListener("click", () => {
     if (newTabHandler) void newTabHandler();
     else void createNewTab();
   });
 
+  signinBtn.addEventListener("click", () => {
+    openAccountScreen("signin");
+  });
+
+  signupBtn.addEventListener("click", () => {
+    openAccountScreen("signup");
+  });
+
   logoutBtn.addEventListener("click", async () => {
     await signOut();
+    await refreshHeaderAuthUi();
     await rerender();
   });
+
+  void refreshHeaderAuthUi();
 
   // ★ DOM生成後、state.view を必ず反映する
   setView(state.view);
 
-  if (state.view === "explorer") {
-    void loadExplorer();
-  } else if (state.view === "dust") {
-    void loadDust();
-  }
+  void (async () => {
+    const session = await getSession();
+    if (!session && state.view !== "editor") {
+      state.view = "editor";
+      setView("editor");
+    }
+
+    if (session && state.view === "explorer") {
+      void loadExplorer();
+    } else if (session && state.view === "dust") {
+      void loadDust();
+    }
+  })();
     
   registerSaveShortcut();
+}
+
+function formatAuthErrorMessage(error: unknown): string {
+  const raw =
+    typeof error === "object" && error && "message" in error
+      ? String((error as { message?: unknown }).message ?? "")
+      : String(error ?? "");
+
+  const normalized = raw.trim().toLowerCase();
+
+  if (normalized.includes("invalid login credentials")) {
+    return "メールアドレスまたはパスワードが正しくありません。";
+  }
+
+  if (normalized.includes("email not confirmed")) {
+    return "メール確認が完了していません。確認メールのリンクを開いてください。";
+  }
+
+  if (normalized.includes("user already registered")) {
+    return "このメールアドレスは既に登録されています。";
+  }
+
+  if (normalized.includes("password should be at least")) {
+    return "パスワードの文字数が不足しています。";
+  }
+
+  return raw || "認証に失敗しました。";
+}
+
+function openAccountScreen(intent: "signin" | "signup", message = "") {
+  authScreenIntent = intent;
+  appScreen = "auth";
+  rerender(message).catch(console.error);
 }
 
 function mountAuthUI(app: HTMLDivElement, message = "") {
@@ -2256,71 +2405,200 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
 
   app.innerHTML = mountAuthUIHtml;
 
-  // message の表示（HTML埋め込みはしない。textContentで安全に）
   const msgEl = qs<HTMLDivElement>("#authMsg");
-
-  if (message) {
-    msgEl.hidden = false;
-    msgEl.textContent = message;
-  } else {
-    msgEl.hidden = true;
-    msgEl.textContent = "";
-  }
-
+  const authTitle = qs<HTMLDivElement>("#authTitle");
+  const authHelp = qs<HTMLDivElement>("#authHelp");
+  const form = qs<HTMLFormElement>("#authForm");
   const emailEl = qs<HTMLInputElement>("#email");
   const passEl = qs<HTMLInputElement>("#password");
   const signupBtn = qs<HTMLButtonElement>("#signupBtn");
   const signinBtn = qs<HTMLButtonElement>("#signinBtn");
+  const forgotBtn = qs<HTMLButtonElement>("#forgotBtn");
+  const backToTopBtn = qs<HTMLButtonElement>("#backToTopBtn");
+
+  const setMsg = (t: string, kind: "info" | "error" = "error") => {
+    if (!t) {
+      msgEl.hidden = true;
+      msgEl.textContent = "";
+      return;
+    }
+    msgEl.hidden = false;
+    msgEl.textContent = t;
+    msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
+  };
+
+  const applyAuthIntent = () => {
+    const isSignup = authScreenIntent === "signup";
+
+    authTitle.textContent = isSignup ? "TypingNote Sign up" : "TypingNote Sign in";
+    authHelp.textContent = isSignup
+      ? "アカウント作成後、確認メールのリンクを開いてください。その後 Sign in すると保存できるようになります。"
+      : "既存アカウントで Sign in してください。アカウント未作成なら Sign up を押してください。";
+
+    signupBtn.classList.toggle("auth-btn-primary", isSignup);
+    signupBtn.classList.toggle("auth-btn-secondary", !isSignup);
+    signinBtn.classList.toggle("auth-btn-primary", !isSignup);
+    signinBtn.classList.toggle("auth-btn-secondary", isSignup);
+    forgotBtn.hidden = isSignup;
+  };
+
+  applyAuthIntent();
+  if (message) setMsg(message, "error");
+  else setMsg("");
 
   const getValues = () => ({
     email: emailEl.value.trim(),
     password: passEl.value,
   });
 
-  signupBtn.addEventListener("click", async () => {
+  const canUseLocalStorage = () => {
     try {
-      const { email, password } = getValues();
-      if (!email || !password) return mountAuthUI(app, "Email と Password を入力してください。");
-      await signUp(email, password);
-      mountAuthUI(app, "サインアップしました。\n確認メールのリンクを開いた後に Sign in してください。");
-    } catch (e: any) {
-      console.error(e);
-      mountAuthUI(app, e?.message ?? String(e));
+      const k = "__tn_ls_test__";
+      localStorage.setItem(k, "1");
+      localStorage.removeItem(k);
+      return true;
+    } catch {
+      return false;
     }
+  };
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const waitForSession = async (timeoutMs = 3000) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const s = await getSession();
+      if (s) return s;
+      await sleep(150);
+    }
+    return null;
+  };
+
+  let busy = false;
+  const setBusy = (v: boolean) => {
+    busy = v;
+    signupBtn.disabled = v;
+    signinBtn.disabled = v;
+    forgotBtn.disabled = v;
+    backToTopBtn.disabled = v;
+  };
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (busy) return;
+
+    const { email, password } = getValues();
+    if (!email || !password) {
+      setMsg("Email と Password を入力してください。", "error");
+      return;
+    }
+
+    const isSignup = authScreenIntent === "signup";
+    const started = performance.now();
+    console.groupCollapsed(`[auth] ${isSignup ? "SignUp" : "SignIn"} attempt ${new Date().toISOString()}`);
+    console.log("email:", email);
+    console.log("href:", window.location.href);
+    console.log("BASE_URL:", import.meta.env.BASE_URL);
+    console.log("localStorage ok:", canUseLocalStorage());
+
+    try {
+      setBusy(true);
+
+      if (isSignup) {
+        setMsg("Signing up...", "info");
+        await signUp(email, password);
+        setMsg("サインアップしました。\n確認メールのリンクを開いた後に Sign in してください。", "info");
+        authScreenIntent = "signin";
+        applyAuthIntent();
+        return;
+      }
+
+      setMsg("Signing in...", "info");
+      const res = await signIn(email, password);
+      console.log("signIn result:", {
+        hasSessionInReturn: !!(res as any)?.session,
+        userId: (res as any)?.user?.id ?? null,
+      });
+
+      const s = await waitForSession(3000);
+      console.log("session after wait:", {
+        hasSession: !!s,
+        userId: s?.user?.id ?? null,
+      });
+
+      if (!s) {
+        setMsg(
+          "サインイン処理は完了しましたが、session が確立できませんでした。\n" +
+            "（localStorage の制限 / Supabase URL・KEY の不一致 / 通信制限 等の可能性）\n" +
+            "コンソールの [auth] ログを確認してください。",
+          "error"
+        );
+        return;
+      }
+
+      setMsg("");
+      appScreen = "memo";
+      await rerender();
+    } catch (e2: any) {
+      console.error(e2);
+      setMsg(formatAuthErrorMessage(e2), "error");
+    } finally {
+      console.log("took(ms):", Math.round(performance.now() - started));
+      console.groupEnd();
+      setBusy(false);
+    }
+  });
+
+  signupBtn.addEventListener("click", async () => {
+    if (busy) return;
+    if (authScreenIntent !== "signup") {
+      authScreenIntent = "signup";
+      applyAuthIntent();
+      setMsg("");
+      return;
+    }
+    form.requestSubmit();
   });
 
   signinBtn.addEventListener("click", async () => {
-    try {
-      const { email, password } = getValues();
-      if (!email || !password) return mountAuthUI(app, "Email と Password を入力してください。");
-      await signIn(email, password);
-      await rerender();
-    } catch (e: any) {
-      console.error(e);
-      mountAuthUI(app, e?.message ?? String(e));
+    if (busy) return;
+    if (authScreenIntent !== "signin") {
+      authScreenIntent = "signin";
+      applyAuthIntent();
+      setMsg("");
+      return;
     }
+    form.requestSubmit();
   });
-
-  const forgotBtn = qs<HTMLButtonElement>("#forgotBtn");
 
   forgotBtn.addEventListener("click", async () => {
     try {
       const email = emailEl.value.trim();
-      if (!email) return mountAuthUI(app, "Email を入力してください。");
+      if (!email) return setMsg("Email を入力してください。", "error");
+
+      setBusy(true);
 
       const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       if (error) throw error;
 
-      mountAuthUI(app, "リセットメールを送信しました。メールのリンクを開いてください。");
+      setMsg("リセットメールを送信しました。メールのリンクを開いてください。", "info");
     } catch (e: any) {
       console.error(e);
-      mountAuthUI(app, e?.message ?? String(e));
+      setMsg(formatAuthErrorMessage(e), "error");
+    } finally {
+      setBusy(false);
     }
+  });
+
+  backToTopBtn.addEventListener("click", async () => {
+    appScreen = "memo";
+    await rerender();
   });
 }
 
 let authMode: "normal" | "recovery" = "normal";
+let appScreen: "memo" | "auth" = "memo";
+let authScreenIntent: "signin" | "signup" = "signin";
 
 function mountResetPasswordUI(app: HTMLDivElement) {
 
@@ -2347,8 +2625,10 @@ function mountResetPasswordUI(app: HTMLDivElement) {
     const { error } = await supabase.auth.updateUser({ password: a });
     if (error) return show(error.message);
 
-    show("更新しました。ログイン画面に戻ります。");
+    show("更新しました。アカウント画面に戻ります。");
     authMode = "normal";
+    authScreenIntent = "signin";
+    appScreen = "auth";
     await supabase.auth.signOut();
     await rerender();
   });
@@ -2357,7 +2637,7 @@ function mountResetPasswordUI(app: HTMLDivElement) {
 
 
 
-async function rerender() {
+async function rerender(message = "") {
   const app = document.querySelector<HTMLDivElement>("#app");
   if (!app) throw new Error("#app not found");
 
@@ -2366,22 +2646,40 @@ async function rerender() {
     return;
   }
 
-  const session = await getSession();
-  if (session) mountMemoUI(app);
-  else mountAuthUI(app);
+  if (appScreen === "auth") {
+    mountAuthUI(app, message);
+    return;
+  }
+
+  mountMemoUI(app);
 }
 
 
 async function mount() {
-  supabase.auth.onAuthStateChange((event) => {
+  supabase.auth.onAuthStateChange((event, session) => {
+    console.log("[auth] onAuthStateChange:", event, {
+      hasSession: !!session,
+      userId: session?.user?.id ?? null,
+    });
+
     if (event === "PASSWORD_RECOVERY") {
       authMode = "recovery";
       rerender().catch(console.error);
       return;
     }
-    if (event === "SIGNED_OUT") authMode = "normal";
+    if (event === "SIGNED_OUT") {
+      authMode = "normal";
+      appScreen = "memo";
+    }
 
-    if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+    if (event === "SIGNED_IN") {
+      authMode = "normal";
+      appScreen = "memo";
+      rerender().catch(console.error);
+      return;
+    }
+
+    if (event === "SIGNED_OUT") {
       rerender().catch(console.error);
     }
   });

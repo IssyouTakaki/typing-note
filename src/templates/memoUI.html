@@ -4,7 +4,12 @@
             <div class="topbar">
                 <div class="title">TypingNote</div>
                 <div class="sub">Editor / Explorer</div>
-                <button id="logoutBtn" class="btn" style="margin-left: auto">Logout</button>
+
+                <div id="authActions" class="header-auth" style="margin-left: auto">
+                    <button id="signupBtn" class="btn btn-auth-secondary" type="button">Sign up</button>
+                    <button id="signinBtn" class="btn btn-auth-primary" type="button">Sign in</button>
+                    <button id="logoutBtn" class="btn btn-logout" type="button" hidden>Logout</button>
+                </div>
             </div>
 
             <nav class="tabbar" aria-label="tabs">
@@ -32,7 +37,7 @@
     <main class="main">
         <section id="editorView" class="view">
             <div class="panes">
-                <div id="presudoTagBar" class="tagbar" hidden>
+                <div id="presudoTagBar" class="tagbar">
                     <div class="tagbar-label">Tags</div>
                     <div id="pseudoTagList" class="taglist" aria-label="tags"></div>
                 </div>
