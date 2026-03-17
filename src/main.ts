@@ -1,6 +1,16 @@
 // src/main.ts
 import "./style.css";
-import { getSession, signIn, signOut, signUp } from "./repos/authRepo";
+import {
+  completeProfileAfterOtp,
+  getSession,
+  getUser,
+  requestSignUpOtp,
+  resendSignUpOtp,
+  signIn,
+  signOut,
+  verifyEmailOtp,
+  type PendingSignUpDraft,
+} from "./repos/authRepo";
 import { supabase } from "./lib/supabaseClient";
 import {
   createMemo, getMemo, listMemos, listDustMemos, updateMemo, trashMemo, restoreMemo, hardDeleteMemo,
@@ -9,6 +19,8 @@ import {
 
 import memoUIHtml from "./templates/memoUI.html?raw";
 import mountAuthUIHtml from "./templates/mountAuthUI.html?raw";
+import signupUIHtml from "./templates/signupUI.html?raw";
+import signupOtpUIHtml from "./templates/signupOtpUI.html?raw";
 import resetPasswordUIHtml from "./templates/resetPasswordUI.html?raw";
 
 type ViewMode = "editor" | "explorer" | "dust";
@@ -886,6 +898,7 @@ function mountMemoUI(app: HTMLDivElement) {
 
   // ---- elements
   const logoutBtn = qs<HTMLButtonElement>("#logoutBtn");
+  const displayNameText = qs<HTMLSpanElement>("#displayNameText");
   const signinBtn = qs<HTMLButtonElement>("#signinBtn");
   const signupBtn = qs<HTMLButtonElement>("#signupBtn");
   const tabList = qs<HTMLDivElement>("#tabList");
@@ -908,11 +921,32 @@ function mountMemoUI(app: HTMLDivElement) {
   const refreshHeaderAuthUi = async () => {
     const session = await getSession();
     const loggedIn = !!session;
-
+  
+    let displayName = "";
+    if (session?.user?.id) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("id", session.user.id)
+        .maybeSingle();
+  
+      const user = await getUser().catch(() => null);
+      displayName = (
+        profile?.display_name ||
+        String(user?.user_metadata?.display_name ?? "").trim() ||
+        String(user?.user_metadata?.given_name ?? "").trim() ||
+        session.user.email?.split("@")[0] ||
+        "User"
+      );
+    }
+  
+    displayNameText.hidden = !loggedIn;
+    displayNameText.textContent = loggedIn ? displayName : "";
+  
     logoutBtn.hidden = !loggedIn;
     signinBtn.hidden = loggedIn;
     signupBtn.hidden = loggedIn;
-
+  
     logoutBtn.disabled = !loggedIn;
     signinBtn.disabled = loggedIn;
     signupBtn.disabled = loggedIn;
@@ -974,6 +1008,65 @@ function mountMemoUI(app: HTMLDivElement) {
     if (state.view !== "editor") return;
     if (isPreviewWide) return;
     input.focus();
+  };
+
+  const focusMemoStart = () => {
+    if (isPreviewWide) return;
+    window.requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(0, 0);
+      input.scrollTop = 0;
+      input.scrollLeft = 0;
+      preview.scrollTop = 0;
+    });
+  };
+  
+  const syncPreviewToCaret = () => {
+    const text = input.value;
+    const maxScroll = Math.max(0, preview.scrollHeight - preview.clientHeight);
+    if (maxScroll <= 0) return;
+  
+    const caret = Math.max(0, input.selectionStart ?? 0);
+    const before = text.slice(0, caret);
+    const beforeLines = before.split(/\r?\n/).length - 1;
+    const totalLines = text.split(/\r?\n/).length - 1;
+  
+    let ratio = 0;
+    if (totalLines > 0) {
+      ratio = beforeLines / totalLines;
+    } else if (text.length > 0) {
+      ratio = caret / text.length;
+    }
+  
+    preview.scrollTop = Math.max(0, Math.min(maxScroll, maxScroll * ratio));
+  };
+  
+  const openMemoFromExplorer = async (id: string) => {
+    await saveIfDirty();
+  
+    const userId = await requireUserId();
+    const memo = await getMemo({ userId, id });
+    if (!memo) return;
+  
+    if (state.tabs.length >= MAX_TABS) {
+      showMessage(`Max ${MAX_TABS} tabs — close one to open another memo.`, 3500);
+      return;
+    }
+  
+    const tabId = crypto.randomUUID();
+    state.tabs.push({
+      id: tabId,
+      text: memo.content,
+      dirty: false,
+      currentMemoId: memo.id,
+    });
+    state.activeTabId = tabId;
+  
+    renderEditor();
+    renderTabs();
+    setView("editor");
+    scrollTabIntoView(tabId);
+    focusMemoStart();
   };
 
   // 初期反映
@@ -1627,12 +1720,14 @@ input.addEventListener("keyup", () => updateTagSuggest());
 input.addEventListener("click", () => updateTagSuggest());
   // ---- renderers
   function renderEditor() {
-
     const tab = activeTab();
     input.value = tab.text;
-    // preview.innerHTML = renderPreviewText(tab.text);
     preview.innerHTML = renderPreviewMarkdown(tab.text);
+    preview.scrollTop = 0;
+  
     if (tab.dirty) msgText.textContent = "Unsaved";
+    else if (!msgText.textContent || msgText.textContent === "Unsaved") msgText.textContent = "";
+  
     renderPseudoTags(tab.text);
   }
 
@@ -1902,48 +1997,30 @@ input.addEventListener("click", () => updateTagSuggest());
   input.addEventListener("input", () => {
     activeTab().text = input.value;
     setDirty(true);
-    // preview.innerHTML = renderPreviewText(activeTab().text);
     preview.innerHTML = renderPreviewMarkdown(activeTab().text);
     renderPseudoTags(input.value);
     renderTabs();
+    syncPreviewToCaret();
   });
 
   // Tag autocomplete
   input.addEventListener("input", () => updateTagSuggest());
-
-
-  // ---- wire explorer
-  // reloadBtn.addEventListener("click", async () => {
-  //   await loadExplorer();
-  // });
+  input.addEventListener("click", () => syncPreviewToCaret());
+  input.addEventListener("keyup", () => syncPreviewToCaret());
+  input.addEventListener("scroll", () => syncPreviewToCaret());
 
   memoList.addEventListener("click", async (ev) => {
     const target = ev.target as HTMLElement | null;
     const btn = target?.closest<HTMLButtonElement>("button.memo-row");
     const id = btn?.dataset.id;
     if (!id) return;
-
-    // Keep a stable keyboard focus point for ↑/↓ and Space
+  
     state.explorerFocusId = id;
     syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
     scrollFocusIntoView(memoList, state.explorerFocusId, "auto");
-
+  
     try {
-      // ここは「切替前に保存」したいなら入れる
-      await saveIfDirty();
-
-      const userId = await requireUserId();
-      const memo = await getMemo({ userId, id });
-      if (!memo) return;
-
-      activeTab().currentMemoId = memo.id;
-      activeTab().text = memo.content;
-      setDirty(false);
-
-      renderEditor();
-      renderTabs();    
-      // updateEditorTabLabel();
-      setView("editor");
+      await openMemoFromExplorer(id);
     } catch (e) {
       console.error(e);
     }
@@ -2048,20 +2125,9 @@ input.addEventListener("click", () => updateTagSuggest());
     ensureExplorerFocus();
     const id = state.explorerFocusId;
     if (!id) return;
-
+  
     try {
-      await saveIfDirty();
-      const userId = await requireUserId();
-      const memo = await getMemo({ userId, id });
-      if (!memo) return;
-
-      activeTab().currentMemoId = memo.id;
-      activeTab().text = memo.content;
-      setDirty(false);
-
-      renderEditor();
-      renderTabs();
-      setView("editor");
+      await openMemoFromExplorer(id);
     } catch (e) {
       console.error(e);
     }
@@ -2383,16 +2449,35 @@ function formatAuthErrorMessage(error: unknown): string {
     return "パスワードの文字数が不足しています。";
   }
 
+  if (
+    normalized.includes("token has expired") ||
+    normalized.includes("otp_expired") ||
+    normalized.includes("expired")
+  ) {
+    return "認証コードの有効期限が切れています。コードを再送してください。";
+  }
+
+  if (
+    normalized.includes("invalid token") ||
+    normalized.includes("token not found") ||
+    normalized.includes("forbidden")
+  ) {
+    return "認証コードが正しくありません。入力内容を確認してください。";
+  }
+
   return raw || "認証に失敗しました。";
 }
 
-function openAccountScreen(intent: "signin" | "signup", message = "") {
-  authScreenIntent = intent;
-  appScreen = "auth";
-  rerender(message).catch(console.error);
-}
+const TERMS_VERSION = "v1";
+const PRIVACY_VERSION = "v1";
+const PENDING_SIGNUP_STORAGE_KEY = "typingnote.pending-signup";
 
-function mountAuthUI(app: HTMLDivElement, message = "") {
+let authMode: "normal" | "recovery" = "normal";
+let appScreen: "memo" | "auth" | "signup" | "signupOtp" = "memo";
+let authFlashKind: "info" | "error" = "error";
+let suppressSignedInRerender = false;
+
+function resetScreenHandlers() {
   goExplorerHandler = null;
   goDustHandler = null;
   newTabHandler = null;
@@ -2402,12 +2487,329 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
   switchTabHandler = null;
   togglePreviewWideHandler = null;
   renderTabsHandler = null;
+}
 
+function openAccountScreen(intent: "signin" | "signup", message = "", kind: "info" | "error" = "error") {
+  authFlashKind = kind;
+  appScreen = intent === "signup" ? "signup" : "auth";
+  rerender(message).catch(console.error);
+}
+
+function openSignupOtpScreen(message = "", kind: "info" | "error" = "info") {
+  authFlashKind = kind;
+  appScreen = "signupOtp";
+  rerender(message).catch(console.error);
+}
+
+function canUseLocalStorage() {
+  try {
+    const k = "__tn_ls_test__";
+    localStorage.setItem(k, "1");
+    localStorage.removeItem(k);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function savePendingSignUpDraft(draft: PendingSignUpDraft) {
+  if (!canUseLocalStorage()) return;
+  localStorage.setItem(PENDING_SIGNUP_STORAGE_KEY, JSON.stringify(draft));
+}
+
+function loadPendingSignUpDraft(): PendingSignUpDraft | null {
+  if (!canUseLocalStorage()) return null;
+
+  const raw = localStorage.getItem(PENDING_SIGNUP_STORAGE_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<PendingSignUpDraft>;
+    if (!parsed || typeof parsed.email !== "string") return null;
+
+    return {
+      email: String(parsed.email ?? "").trim(),
+      password: String(parsed.password ?? ""),
+      displayName: String(parsed.displayName ?? "").trim(),
+      familyName: String(parsed.familyName ?? "").trim(),
+      givenName: String(parsed.givenName ?? "").trim(),
+      agreedTermsAt: String(parsed.agreedTermsAt ?? ""),
+      termsVersion: String(parsed.termsVersion ?? TERMS_VERSION),
+      agreedPrivacyAt: String(parsed.agreedPrivacyAt ?? ""),
+      privacyVersion: String(parsed.privacyVersion ?? PRIVACY_VERSION),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingSignUpDraft() {
+  if (!canUseLocalStorage()) return;
+  localStorage.removeItem(PENDING_SIGNUP_STORAGE_KEY);
+}
+
+function buildDisplayName(displayName: string, familyName: string, givenName: string) {
+  const direct = displayName.trim();
+  if (direct) return direct;
+  return [familyName.trim(), givenName.trim()].filter(Boolean).join(" ").trim();
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const waitForSession = async (timeoutMs = 3000) => {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const s = await getSession();
+    if (s) return s;
+    await sleep(150);
+  }
+  return null;
+};
+
+// function openAccountScreen(intent: "signin" | "signup", message = "") {
+//   authScreenIntent = intent;
+//   appScreen = "auth";
+//   rerender(message).catch(console.error);
+// }
+
+function mountSignUpUI(app: HTMLDivElement, message = "") {
+  resetScreenHandlers();
+  app.innerHTML = signupUIHtml;
+
+  const msgEl = qs<HTMLDivElement>("#signupMsg");
+  const form = qs<HTMLFormElement>("#signupForm");
+  const displayNameEl = qs<HTMLInputElement>("#signupDisplayName");
+  const familyNameEl = qs<HTMLInputElement>("#signupFamilyName");
+  const givenNameEl = qs<HTMLInputElement>("#signupGivenName");
+  const emailEl = qs<HTMLInputElement>("#signupEmail");
+  const passEl = qs<HTMLInputElement>("#signupPassword");
+  const pass2El = qs<HTMLInputElement>("#signupPassword2");
+  const agreeTermsEl = qs<HTMLInputElement>("#agreeTerms");
+  const agreePrivacyEl = qs<HTMLInputElement>("#agreePrivacy");
+  const submitBtn = qs<HTMLButtonElement>("#signupSubmitBtn");
+  const backBtn = qs<HTMLButtonElement>("#signupBackBtn");
+  const topBtn = qs<HTMLButtonElement>("#signupTopBtn");
+
+  const draft = loadPendingSignUpDraft();
+  if (draft) {
+    displayNameEl.value = draft.displayName;
+    familyNameEl.value = draft.familyName;
+    givenNameEl.value = draft.givenName;
+    emailEl.value = draft.email;
+    passEl.value = draft.password;
+    pass2El.value = draft.password;
+    agreeTermsEl.checked = !!draft.agreedTermsAt;
+    agreePrivacyEl.checked = !!draft.agreedPrivacyAt;
+  }
+
+  const setMsg = (t: string, kind: "info" | "error" = "error") => {
+    if (!t) {
+      msgEl.hidden = true;
+      msgEl.textContent = "";
+      return;
+    }
+    msgEl.hidden = false;
+    msgEl.textContent = t;
+    msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
+  };
+
+  if (message) setMsg(message, authFlashKind);
+  else setMsg("");
+
+  let busy = false;
+  const setBusy = (v: boolean) => {
+    busy = v;
+    submitBtn.disabled = v;
+    backBtn.disabled = v;
+    topBtn.disabled = v;
+  };
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (busy) return;
+
+    const displayName = buildDisplayName(displayNameEl.value, familyNameEl.value, givenNameEl.value);
+    const familyName = familyNameEl.value.trim();
+    const givenName = givenNameEl.value.trim();
+    const email = emailEl.value.trim();
+    const password = passEl.value;
+    const password2 = pass2El.value;
+
+    if (!displayName) {
+      setMsg("Display name を入力してください。", "error");
+      return;
+    }
+
+    if (!email) {
+      setMsg("Email を入力してください。", "error");
+      return;
+    }
+
+    if (!password) {
+      setMsg("Password を入力してください。", "error");
+      return;
+    }
+
+    if (password !== password2) {
+      setMsg("Password と Confirm password が一致していません。", "error");
+      return;
+    }
+
+    if (!agreeTermsEl.checked || !agreePrivacyEl.checked) {
+      setMsg("利用規約とプライバシーポリシーへの同意が必要です。", "error");
+      return;
+    }
+
+    const agreedAt = new Date().toISOString();
+    const nextDraft: PendingSignUpDraft = {
+      email,
+      password,
+      displayName,
+      familyName,
+      givenName,
+      agreedTermsAt: agreedAt,
+      termsVersion: TERMS_VERSION,
+      agreedPrivacyAt: agreedAt,
+      privacyVersion: PRIVACY_VERSION,
+    };
+
+    try {
+      setBusy(true);
+      setMsg("認証コードを送信しています...", "info");
+      await requestSignUpOtp(nextDraft);
+      savePendingSignUpDraft(nextDraft);
+      openSignupOtpScreen("認証コードをメールで送信しました。メールに届いた 8 桁コードを入力してください。", "info");
+    } catch (err: any) {
+      console.error(err);
+      setMsg(formatAuthErrorMessage(err), "error");
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  backBtn.addEventListener("click", async () => {
+    openAccountScreen("signin");
+  });
+
+  topBtn.addEventListener("click", async () => {
+    appScreen = "memo";
+    await rerender();
+  });
+}
+
+function mountSignUpOtpUI(app: HTMLDivElement, message = "") {
+  resetScreenHandlers();
+  app.innerHTML = signupOtpUIHtml;
+
+  const msgEl = qs<HTMLDivElement>("#signupOtpMsg");
+  const helpEl = qs<HTMLDivElement>("#signupOtpHelp");
+  const form = qs<HTMLFormElement>("#signupOtpForm");
+  const emailEl = qs<HTMLInputElement>("#signupOtpEmail");
+  const codeEl = qs<HTMLInputElement>("#signupOtpCode");
+  const verifyBtn = qs<HTMLButtonElement>("#signupOtpVerifyBtn");
+  const resendBtn = qs<HTMLButtonElement>("#signupOtpResendBtn");
+  const backBtn = qs<HTMLButtonElement>("#signupOtpBackBtn");
+  const topBtn = qs<HTMLButtonElement>("#signupOtpTopBtn");
+
+  const draft = loadPendingSignUpDraft();
+
+  const setMsg = (t: string, kind: "info" | "error" = "error") => {
+    if (!t) {
+      msgEl.hidden = true;
+      msgEl.textContent = "";
+      return;
+    }
+    msgEl.hidden = false;
+    msgEl.textContent = t;
+    msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
+  };
+
+  if (!draft) {
+    emailEl.value = "";
+    helpEl.textContent = "先にアカウント作成画面からメールアドレスを入力してください。";
+    verifyBtn.disabled = true;
+    resendBtn.disabled = true;
+    setMsg("アカウント作成情報が見つかりません。入力画面からやり直してください。", "error");
+  } else {
+    emailEl.value = draft.email;
+    helpEl.textContent = `${draft.email} に送信された 8 桁の認証コードを入力してください。`;
+    if (message) setMsg(message, authFlashKind);
+    else setMsg("");
+  }
+
+  let busy = false;
+  const setBusy = (v: boolean) => {
+    busy = v;
+    verifyBtn.disabled = v || !draft;
+    resendBtn.disabled = v || !draft;
+    backBtn.disabled = v;
+    topBtn.disabled = v;
+  };
+
+  codeEl.addEventListener("input", () => {
+    codeEl.value = codeEl.value.replace(/\D+/g, "").slice(0, 8);
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (busy || !draft) return;
+
+    const code = codeEl.value.trim();
+    if (!/^\d{8}$/.test(code)) {
+      setMsg("8 桁の認証コードを入力してください。", "error");
+      return;
+    }
+
+    try {
+      setBusy(true);
+      setMsg("認証しています...", "info");
+      suppressSignedInRerender = true;
+      await verifyEmailOtp(draft.email, code);
+      await completeProfileAfterOtp(draft);
+      clearPendingSignUpDraft();
+      suppressSignedInRerender = false;
+      appScreen = "memo";
+      await rerender();
+    } catch (err: any) {
+      suppressSignedInRerender = false;
+      console.error(err);
+      setMsg(formatAuthErrorMessage(err), "error");
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  resendBtn.addEventListener("click", async () => {
+    if (busy || !draft) return;
+    try {
+      setBusy(true);
+      setMsg("認証コードを再送しています...", "info");
+      await resendSignUpOtp(draft);
+      setMsg("認証コードを再送しました。最新のメールを確認してください。", "info");
+    } catch (err: any) {
+      console.error(err);
+      setMsg(formatAuthErrorMessage(err), "error");
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  backBtn.addEventListener("click", async () => {
+    if (busy) return;
+    openAccountScreen("signup");
+  });
+
+  topBtn.addEventListener("click", async () => {
+    if (busy) return;
+    appScreen = "memo";
+    await rerender();
+  });
+}
+
+function mountAuthUI(app: HTMLDivElement, message = "") {
+  resetScreenHandlers();
   app.innerHTML = mountAuthUIHtml;
 
   const msgEl = qs<HTMLDivElement>("#authMsg");
-  const authTitle = qs<HTMLDivElement>("#authTitle");
-  const authHelp = qs<HTMLDivElement>("#authHelp");
   const form = qs<HTMLFormElement>("#authForm");
   const emailEl = qs<HTMLInputElement>("#email");
   const passEl = qs<HTMLInputElement>("#password");
@@ -2427,51 +2829,8 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
     msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
   };
 
-  const applyAuthIntent = () => {
-    const isSignup = authScreenIntent === "signup";
-
-    authTitle.textContent = isSignup ? "TypingNote Sign up" : "TypingNote Sign in";
-    authHelp.textContent = isSignup
-      ? "アカウント作成後、確認メールのリンクを開いてください。その後 Sign in すると保存できるようになります。"
-      : "既存アカウントで Sign in してください。アカウント未作成なら Sign up を押してください。";
-
-    signupBtn.classList.toggle("auth-btn-primary", isSignup);
-    signupBtn.classList.toggle("auth-btn-secondary", !isSignup);
-    signinBtn.classList.toggle("auth-btn-primary", !isSignup);
-    signinBtn.classList.toggle("auth-btn-secondary", isSignup);
-    forgotBtn.hidden = isSignup;
-  };
-
-  applyAuthIntent();
-  if (message) setMsg(message, "error");
+  if (message) setMsg(message, authFlashKind);
   else setMsg("");
-
-  const getValues = () => ({
-    email: emailEl.value.trim(),
-    password: passEl.value,
-  });
-
-  const canUseLocalStorage = () => {
-    try {
-      const k = "__tn_ls_test__";
-      localStorage.setItem(k, "1");
-      localStorage.removeItem(k);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  const waitForSession = async (timeoutMs = 3000) => {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      const s = await getSession();
-      if (s) return s;
-      await sleep(150);
-    }
-    return null;
-  };
 
   let busy = false;
   const setBusy = (v: boolean) => {
@@ -2486,15 +2845,15 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
     e.preventDefault();
     if (busy) return;
 
-    const { email, password } = getValues();
+    const email = emailEl.value.trim();
+    const password = passEl.value;
     if (!email || !password) {
       setMsg("Email と Password を入力してください。", "error");
       return;
     }
 
-    const isSignup = authScreenIntent === "signup";
     const started = performance.now();
-    console.groupCollapsed(`[auth] ${isSignup ? "SignUp" : "SignIn"} attempt ${new Date().toISOString()}`);
+    console.groupCollapsed(`[auth] SignIn attempt ${new Date().toISOString()}`);
     console.log("email:", email);
     console.log("href:", window.location.href);
     console.log("BASE_URL:", import.meta.env.BASE_URL);
@@ -2502,16 +2861,6 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
 
     try {
       setBusy(true);
-
-      if (isSignup) {
-        setMsg("Signing up...", "info");
-        await signUp(email, password);
-        setMsg("サインアップしました。\n確認メールのリンクを開いた後に Sign in してください。", "info");
-        authScreenIntent = "signin";
-        applyAuthIntent();
-        return;
-      }
-
       setMsg("Signing in...", "info");
       const res = await signIn(email, password);
       console.log("signIn result:", {
@@ -2550,24 +2899,7 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
 
   signupBtn.addEventListener("click", async () => {
     if (busy) return;
-    if (authScreenIntent !== "signup") {
-      authScreenIntent = "signup";
-      applyAuthIntent();
-      setMsg("");
-      return;
-    }
-    form.requestSubmit();
-  });
-
-  signinBtn.addEventListener("click", async () => {
-    if (busy) return;
-    if (authScreenIntent !== "signin") {
-      authScreenIntent = "signin";
-      applyAuthIntent();
-      setMsg("");
-      return;
-    }
-    form.requestSubmit();
+    openAccountScreen("signup");
   });
 
   forgotBtn.addEventListener("click", async () => {
@@ -2596,9 +2928,9 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
   });
 }
 
-let authMode: "normal" | "recovery" = "normal";
-let appScreen: "memo" | "auth" = "memo";
-let authScreenIntent: "signin" | "signup" = "signin";
+// let authMode: "normal" | "recovery" = "normal";
+// let appScreen: "memo" | "auth" = "memo";
+// let authScreenIntent: "signin" | "signup" = "signin";
 
 function mountResetPasswordUI(app: HTMLDivElement) {
 
@@ -2627,15 +2959,11 @@ function mountResetPasswordUI(app: HTMLDivElement) {
 
     show("更新しました。アカウント画面に戻ります。");
     authMode = "normal";
-    authScreenIntent = "signin";
     appScreen = "auth";
     await supabase.auth.signOut();
     await rerender();
   });
 }
-
-
-
 
 async function rerender(message = "") {
   const app = document.querySelector<HTMLDivElement>("#app");
@@ -2648,6 +2976,16 @@ async function rerender(message = "") {
 
   if (appScreen === "auth") {
     mountAuthUI(app, message);
+    return;
+  }
+
+  if (appScreen === "signup") {
+    mountSignUpUI(app, message);
+    return;
+  }
+
+  if (appScreen === "signupOtp") {
+    mountSignUpOtpUI(app, message);
     return;
   }
 
@@ -2674,6 +3012,7 @@ async function mount() {
 
     if (event === "SIGNED_IN") {
       authMode = "normal";
+      if (suppressSignedInRerender) return;
       appScreen = "memo";
       rerender().catch(console.error);
       return;

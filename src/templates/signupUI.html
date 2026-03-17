@@ -1,0 +1,60 @@
+<div class="layout auth-layout">
+    <form id="signupForm" class="auth-card" autocomplete="on">
+        <div class="auth-title">TypingNote Sign up</div>
+
+        <div class="auth-help">
+            アカウント情報を入力すると、メールアドレス宛に認証コードを送信します。<br />
+            そのコードを次の画面で入力すると、アカウント作成が完了します。
+        </div>
+
+        <div id="signupMsg" class="auth-msg" hidden></div>
+
+        <label class="auth-label">Display name</label>
+        <input id="signupDisplayName" class="auth-input" type="text" autocomplete="nickname" />
+
+        <div class="auth-grid auth-grid-2">
+            <div>
+                <label class="auth-label">Family name</label>
+                <input id="signupFamilyName" class="auth-input" type="text" autocomplete="family-name" />
+            </div>
+            <div>
+                <label class="auth-label">Given name</label>
+                <input id="signupGivenName" class="auth-input" type="text" autocomplete="given-name" />
+            </div>
+        </div>
+
+        <label class="auth-label">Email</label>
+        <input id="signupEmail" class="auth-input" type="email" autocomplete="email" />
+
+        <label class="auth-label">Password</label>
+        <input id="signupPassword" class="auth-input" type="password" autocomplete="new-password" />
+
+        <label class="auth-label">Confirm password</label>
+        <input id="signupPassword2" class="auth-input" type="password" autocomplete="new-password" />
+
+        <label class="auth-check">
+            <input id="agreeTerms" type="checkbox" />
+            <span>利用規約に同意する</span>
+        </label>
+
+        <label class="auth-check">
+            <input id="agreePrivacy" type="checkbox" />
+            <span>プライバシーポリシーに同意する</span>
+        </label>
+
+        <div class="auth-actions auth-actions-stack-mobile">
+            <button id="signupSubmitBtn" class="auth-btn auth-btn-primary" type="submit">
+                認証コードを送信
+            </button>
+            <button id="signupBackBtn" class="auth-btn auth-btn-secondary" type="button">
+                Sign in に戻る
+            </button>
+        </div>
+
+        <button id="signupTopBtn" class="auth-btn auth-btn-link" type="button">TypingNote に戻る</button>
+
+        <div class="auth-note">
+            ※ Supabase の Confirm signup メールテンプレートで <code>{{ .Token }}</code> を使うと、8 桁 OTP を送信できます。
+        </div>
+    </form>
+</div>

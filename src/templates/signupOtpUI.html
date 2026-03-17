@@ -1,0 +1,36 @@
+<div class="layout auth-layout">
+    <form id="signupOtpForm" class="auth-card" autocomplete="one-time-code">
+        <div class="auth-title">Email verification</div>
+
+        <div id="signupOtpHelp" class="auth-help">
+            メールに届いた 8 桁の認証コードを入力してください。
+        </div>
+
+        <div id="signupOtpMsg" class="auth-msg" hidden></div>
+
+        <label class="auth-label">Email</label>
+        <input id="signupOtpEmail" class="auth-input" type="email" readonly />
+
+        <label class="auth-label">OTP code</label>
+        <input
+            id="signupOtpCode"
+            class="auth-input auth-otp-input"
+            type="text"
+            inputmode="numeric"
+            maxlength="8"
+            autocomplete="one-time-code"
+        />
+
+        <div class="auth-actions auth-actions-stack-mobile">
+            <button id="signupOtpVerifyBtn" class="auth-btn auth-btn-primary" type="submit">
+                認証してアカウント作成
+            </button>
+            <button id="signupOtpResendBtn" class="auth-btn auth-btn-secondary" type="button">
+                コードを再送
+            </button>
+        </div>
+
+        <button id="signupOtpBackBtn" class="auth-btn auth-btn-link" type="button">入力画面に戻る</button>
+        <button id="signupOtpTopBtn" class="auth-btn auth-btn-link" type="button">TypingNote に戻る</button>
+    </form>
+</div>

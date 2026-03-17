@@ -1,9 +1,10 @@
 <div class="layout auth-layout">
     <form id="authForm" class="auth-card" autocomplete="on">
-        <div id="authTitle" class="auth-title">TypingNote Account</div>
+        <div id="authTitle" class="auth-title">TypingNote Sign in</div>
 
         <div id="authHelp" class="auth-help">
-            アカウント作成後、確認メールのリンクを開いてからサインインしてください（メール確認必須）
+            既存アカウントで Sign in してください。<br />
+            アカウント未作成なら Sign up してください。
         </div>
 
         <div id="authMsg" class="auth-msg" hidden></div>
@@ -14,21 +15,16 @@
         <label class="auth-label">Password</label>
         <input id="password" class="auth-input" type="password" autocomplete="current-password" />
 
-        <div class="auth-actions">
-            <button id="signupBtn" class="auth-btn auth-btn-secondary" type="button">
-                Sign up
-            </button>
-
+        <div class="auth-actions auth-actions-stack-mobile">
             <button id="signinBtn" class="auth-btn auth-btn-primary" type="submit">
                 Sign in
+            </button>
+            <button id="signupBtn" class="auth-btn auth-btn-secondary" type="button">
+                Create account
             </button>
         </div>
 
         <button id="forgotBtn" class="auth-btn auth-btn-link" type="button">パスワードをお忘れですか？</button>
         <button id="backToTopBtn" class="auth-btn auth-btn-link" type="button">TypingNote に戻る</button>
-
-        <div class="auth-note">
-            ※メールが届かない場合は、Supabase → Authentication → Users で確認状態を見直してください。
-        </div>
     </form>
 </div>
