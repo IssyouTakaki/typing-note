@@ -436,7 +436,6 @@ body {
   color: #666;
 }
 
-
 .textarea {
   width: 100%;
   flex: 1;
@@ -446,20 +445,39 @@ body {
   padding: 12px;
   font-size: 14px;
   line-height: 1.6;
+
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Noto Sans Mono CJK JP", "Noto Sans Mono", monospace;
+  tab-size: 4;
+  -moz-tab-size: 4;
 }
 
 .preview {
   flex: 1;
   padding: 12px;
   overflow: auto;
+  tab-size: 4;
+  -moz-tab-size: 4;
+}
+
+.preview-pre,
+.preview .md-li,
+.preview .md-todo-text,
+.preview .md-h1,
+.preview .md-h2,
+.preview .md-h3 {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Noto Sans Mono CJK JP", "Noto Sans Mono", monospace;
 }
 
 .preview-pre {
   margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 1.6;
+  tab-size: 4;
+  -moz-tab-size: 4;
 }
 
 /* --- Preview: minimal Markdown headings (#/##/###) --- */
@@ -469,16 +487,17 @@ body {
   margin: 10px 0 8px;
   line-height: 1.25;
   font-weight: 800;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
 }
 
-.preview .md-h1{
-  font-size: 20px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid #eef1f4;
+.preview-pre {
+  margin: 0;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.6;
 }
-
-.preview .md-h2{ font-size: 17px; }
-.preview .md-h3{ font-size: 15px; }
 
 /* --- Preview: minimal Markdown lists (- / 1.) --- */
 .preview .md-ul,
@@ -490,7 +509,94 @@ body {
 .preview .md-li{
   margin: 2px 0;
   line-height: 1.6;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.preview .md-cols-table{
+  margin: 8px 0;
+  border-collapse: collapse;
+  width: max-content;
+  max-width: none;
+}
+
+.preview .md-cols-table td{
+  padding: 0;
+  vertical-align: top;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Noto Sans Mono CJK JP", "Noto Sans Mono", monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.preview .md-cols-marker{
+  padding-right: 10px;
+  white-space: pre;
+}
+
+.preview .md-cols-cell{
+  padding-right: 32px;
+  white-space: pre;
+}
+
+.preview .md-cols-cell:last-child{
+  padding-right: 0;
+}
+
+.preview .md-cols-table-ol .md-cols-marker{
+  text-align: right;
+  padding-right: 12px;
+}
+
+/* --- Preview: minimal Markdown headings (#/##/###) --- */
+.preview .md-h1,
+.preview .md-h2,
+.preview .md-h3{
+  margin: 10px 0 8px;
+  line-height: 1.25;
+  font-weight: 800;
+  white-space: break-spaces;
   overflow-wrap: anywhere;
+}
+
+.preview .md-h1{
+  font-size: 20px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #eef1f4;
+}
+
+.preview .md-h2{ font-size: 17px; }
+.preview .md-h3{ font-size: 15px; }
+
+.preview .md-li-todo{
+  list-style: none;
+}
+
+.preview .md-todo{
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.preview .md-todo-checkbox{
+  margin-top: 0.28em;
+  width: 14px;
+  height: 14px;
+  accent-color: #0b57d0;
+  pointer-events: none;
+}
+
+.preview .md-todo-text{
+  display: inline-block;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.preview .md-todo-checkbox:checked + .md-todo-text{
+  color: #666;
+  text-decoration: line-through;
 }
 
 .preview .md-blank{
@@ -583,8 +689,6 @@ body {
   background: rgba(11, 87, 208, 0.08);
   border-color: #0b57d0 !important;
 }
-
-
 
 /* --- Auth / header buttons --- */
 .auth-layout{
@@ -831,4 +935,63 @@ body {
   .auth-actions-stack-mobile{
     flex-direction: column;
   }
+}
+
+.auth-inline-link{
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #0b57d0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.auth-inline-link:hover{
+  color: #0842a0;
+}
+
+.auth-legal-links{
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.auth-legal-sep{
+  color: #999;
+  font-size: 12px;
+}
+
+.auth-btn-inline{
+  width: auto;
+  margin-top: 0;
+  padding: 0;
+}
+
+.legal-card{
+  width: min(760px, 94vw);
+}
+
+.legal-body{
+  margin: 12px 0 16px;
+  max-height: 60vh;
+  overflow: auto;
+  padding-right: 4px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #333;
+}
+
+.legal-body h2{
+  margin: 18px 0 8px;
+  font-size: 16px;
+}
+
+.legal-body p{
+  margin: 0 0 10px;
 }

@@ -1,6 +1,7 @@
 // src/main.ts
 import "./style.css";
 import {
+  beginSignUp,
   completeProfileAfterOtp,
   getSession,
   getUser,
@@ -11,7 +12,9 @@ import {
   verifyEmailOtp,
   type PendingSignUpDraft,
 } from "./repos/authRepo";
+
 import { supabase } from "./lib/supabaseClient";
+
 import {
   createMemo, getMemo, listMemos, listDustMemos, updateMemo, trashMemo, restoreMemo, hardDeleteMemo,
   type MemoRow
@@ -22,14 +25,20 @@ import mountAuthUIHtml from "./templates/mountAuthUI.html?raw";
 import signupUIHtml from "./templates/signupUI.html?raw";
 import signupOtpUIHtml from "./templates/signupOtpUI.html?raw";
 import resetPasswordUIHtml from "./templates/resetPasswordUI.html?raw";
+import termsUIHtml from "./templates/termsUI.html?raw";
+import privacyUIHtml from "./templates/privacyUI.html?raw";
+import forgotPasswordUIHtml from "./templates/forgotPasswordUI.html?raw";
+
 
 type ViewMode = "editor" | "explorer" | "dust";
 
 type TabState = {
   id: string;
+  mode: ViewMode;
   text: string;
   dirty: boolean;
   currentMemoId: string | null;
+  returnToTabId: string | null;
 };
 
 type AppState = {
@@ -48,9 +57,9 @@ type AppState = {
 
 const DEFAULT_TEXT = `# Shortcut List
 
-01. ALT + SHIFT + CONTROL + 1-8 = Go To Memo Tab
-02. ALT + SHIFT + CONTROL + 0 = Go To Dust Tab
-03. ALT + SHIFT + CONTROL + 9 = Go To Explorer Tab
+01. ALT + SHIFT + CONTROL + 1-8 = Go To Tab
+02. ALT + SHIFT + CONTROL + 0 = Open Dust Tab
+03. ALT + SHIFT + CONTROL + 9 = Open Explorer Tab
 04. ALT + SHIFT + CONTROL + S = Save a Memo
 05. ALT + SHIFT + CONTROL + T = Create a Memo
 06. ALT + SHIFT + CONTROL + D = Delete a Memo
@@ -60,21 +69,39 @@ const DEFAULT_TEXT = `# Shortcut List
 10. (Explorer/Dust) Enter = Open focused memo (when none selected)
 11. ALT + SHIFT + CONTROL + V = Toggle Preview Wide (Hide/Show Input)
 
+# Explorer Behavior
+
+- Opening a memo from Explorer reuses the existing tab when that memo is already open.
+- The same memo tab is not opened twice.
+
+# Editor
+
+- Tab = Align to the next tab stop
+- Shift + Tab = Move selected lines back to the previous tab stop
+
 # Markdown Preview (implemented)
 
 - Headings: # / ## / ###
 - Unordered list: - item
 - Ordered list: 1. item
 - Horizontal rule: ---
+- Todo checklist:
+  - [ ] unchecked item
+  - [x] checked item
 
 Inline code example: \`const x = 1;\`
 
 Code block example:
 \`\`\`ts
 function hello() {
-  console.log("hi");
+    console.log("hi");
 }
 \`\`\`
+
+Todo example:
+- [ ] Build
+- [x] Preview
+- [ ] Release
 
 `;
 
@@ -83,7 +110,14 @@ const firstTabId = crypto.randomUUID();
 const state: AppState = {
   view: "editor",
   tabs: [
-    { id: firstTabId, text: DEFAULT_TEXT, dirty: false, currentMemoId: null }
+    {
+      id: firstTabId,
+      mode: "editor",
+      text: DEFAULT_TEXT,
+      dirty: false,
+      currentMemoId: null,
+      returnToTabId: null,
+    }
   ],
   activeTabId: firstTabId,
   memos: [],
@@ -96,6 +130,38 @@ const state: AppState = {
   dustSelectedIds: new Set<string>(),
 };
 
+const PASSWORD_POLICY = {
+  minLength: 8,
+  requireLowercase: true,
+  requireUppercase: true,
+  requireDigit: true,
+  requireSymbol: true,
+};
+
+function validatePassword(password: string): string[] {
+  const errors: string[] = [];
+
+  if (password.length < PASSWORD_POLICY.minLength) {
+    errors.push(`${PASSWORD_POLICY.minLength}文字以上`);
+  }
+  if (PASSWORD_POLICY.requireLowercase && !/[a-z]/.test(password)) {
+    errors.push("英小文字を1文字以上");
+  }
+  if (PASSWORD_POLICY.requireUppercase && !/[A-Z]/.test(password)) {
+    errors.push("英大文字を1文字以上");
+  }
+  if (PASSWORD_POLICY.requireDigit && !/[0-9]/.test(password)) {
+    errors.push("数字を1文字以上");
+  }
+  if (
+    PASSWORD_POLICY.requireSymbol &&
+    !/[!@#$%^&*()_+\-=\[\]{};':"\\|<>?,./`~]/.test(password)
+  ) {
+    errors.push("記号を1文字以上");
+  }
+
+  return errors;
+}
 
 function formatYmd(iso: string | null | undefined) {
   if (!iso) return "—";
@@ -151,13 +217,139 @@ function renderInlineCode(input: string): string {
   return out;
 }
 
-// --- Minimal Markdown (Phase 3): headings + lists + hr + code blocks + inline code
+type PreviewListItem =
+  | { kind: "html"; html: string }
+  | { kind: "cols"; marker: string; cells: string[]; indentLevel: number };
+
+function splitPreviewColumns(input: string): string[] | null {
+  // 列区切りは「本物のタブ文字」だけにする。
+  // 半角スペース複数個は、ただのスペースとして扱う。
+  if (!input.includes("\t")) return null;
+
+  const cells = input.split("\t").map((cell) => cell.trim());
+
+  if (cells.length < 2) return null;
+  if (cells.every((cell) => cell.length === 0)) return null;
+
+  return cells;
+}
+
+function renderPreviewPlainColumnsTable(rows: string[][]): string {
+  if (rows.length === 0) return "";
+
+  const maxCols = rows.reduce((max, row) => Math.max(max, row.length), 0);
+
+  const body = rows
+    .map((row) => {
+      const padded = Array.from({ length: maxCols }, (_, i) => row[i] ?? "");
+
+      return `
+        <tr class="md-cols-row">
+          ${padded
+            .map(
+              (cell) =>
+                `<td class="md-cols-cell">${cell ? renderInlineCode(cell) : ""}</td>`
+            )
+            .join("")}
+        </tr>
+      `;
+    })
+    .join("");
+
+  return `<table class="md-cols-table md-cols-table-plain"><tbody>${body}</tbody></table>`;
+}
+
+function renderPreviewTextBlock(text: string): string {
+  return `<pre class="preview-pre">${renderInlineCode(text)}</pre>`;
+}
+
+function renderPreviewColumnsTable(
+  rows: Array<{ marker: string; cells: string[]; indentLevel?: number }>,
+  mode: "ul" | "ol"
+): string {
+  if (rows.length === 0) return "";
+
+  const maxCols = rows.reduce((max, row) => Math.max(max, row.cells.length), 0);
+
+  const body = rows
+    .map((row) => {
+      const padded = Array.from({ length: maxCols }, (_, i) => row.cells[i] ?? "");
+      const indentStyle = previewTableIndentStyle(row.indentLevel ?? 0);
+
+      return `
+        <tr class="md-cols-row">
+          <td class="md-cols-marker"${indentStyle}>${escapeHtml(row.marker)}</td>
+          ${padded
+            .map(
+              (cell) =>
+                `<td class="md-cols-cell">${cell ? renderInlineCode(cell) : ""}</td>`
+            )
+            .join("")}
+        </tr>
+      `;
+    })
+    .join("");
+
+  return `<table class="md-cols-table md-cols-table-${mode}"><tbody>${body}</tbody></table>`;
+}
+
+function renderPreviewList(
+  mode: "ul" | "ol",
+  items: PreviewListItem[]
+): string {
+  if (items.length === 0) return "";
+
+  const parts: string[] = [];
+  let htmlBuf: string[] = [];
+  let colsBuf: Array<{ marker: string; cells: string[]; indentLevel: number }> = [];
+
+  const flushHtml = () => {
+    if (htmlBuf.length === 0) return;
+
+    parts.push(
+      mode === "ul"
+        ? `<ul class="md-ul">${htmlBuf.join("")}</ul>`
+        : `<ol class="md-ol">${htmlBuf.join("")}</ol>`
+    );
+
+    htmlBuf = [];
+  };
+
+  const flushCols = () => {
+    if (colsBuf.length === 0) return;
+    parts.push(renderPreviewColumnsTable(colsBuf, mode));
+    colsBuf = [];
+  };
+
+  for (const item of items) {
+    if (item.kind === "html") {
+      flushCols();
+      htmlBuf.push(item.html);
+      continue;
+    }
+
+    flushHtml();
+    colsBuf.push({
+      marker: item.marker,
+      cells: item.cells,
+      indentLevel: item.indentLevel,
+    });
+  }
+
+  flushHtml();
+  flushCols();
+
+  return parts.join("\n");
+}
+
+// --- Minimal Markdown (Phase 3): headings + lists + hr + code blocks + inline code + todo checklists
 function renderPreviewMarkdown(text: string): string {
   const lines = text.split(/\r?\n/);
 
   const parts: string[] = [];
   let buf: string[] = [];
   let listMode: "ul" | "ol" | null = null;
+  let listItems: PreviewListItem[] = [];
 
   // fenced code block state
   let inFence = false;
@@ -166,23 +358,23 @@ function renderPreviewMarkdown(text: string): string {
 
   const flushText = () => {
     if (buf.length === 0) return;
-    const html = renderInlineCode(buf.join("\n"));
-    parts.push(`<pre class="preview-pre">${html}</pre>`);
+    parts.push(renderPreviewTextBlock(buf.join("\n")));
     buf = [];
   };
 
   const closeList = () => {
     if (!listMode) return;
-    parts.push(listMode === "ul" ? `</ul>` : `</ol>`);
+    parts.push(renderPreviewList(listMode, listItems));
     listMode = null;
+    listItems = [];
   };
 
   const openList = (mode: "ul" | "ol") => {
     if (listMode === mode) return;
     closeList();
     flushText();
-    parts.push(mode === "ul" ? `<ul class="md-ul">` : `<ol class="md-ol">`);
     listMode = mode;
+    listItems = [];
   };
 
   const flushFence = () => {
@@ -193,6 +385,17 @@ function renderPreviewMarkdown(text: string): string {
     );
     fenceBuf = [];
     fenceLang = "";
+  };
+
+  const renderTodoItem = (
+    content: string,
+    checked: boolean,
+    indentLevel = 0
+  ) => {
+    const checkedAttr = checked ? " checked" : "";
+    const indentStyle = previewIndentStyle(indentLevel);
+
+    return `<li class="md-li md-li-todo"${indentStyle}><label class="md-todo"><input class="md-todo-checkbox" type="checkbox" disabled${checkedAttr}><span class="md-todo-text">${renderInlineCode(content)}</span></label></li>`;
   };
 
   for (const line of lines) {
@@ -257,14 +460,50 @@ function renderPreviewMarkdown(text: string): string {
       }
     }
 
-    // unordered list: "- item"
+    // todo list: "- [ ] item" / "- [x] item"
     {
-      const m = line.match(/^\s*-\s+(.+)$/);
+      const m = line.match(/^([ \t]*)[-*]\s+\[([ xX])]\s+(.+)$/);
       if (m) {
-        const content = m[1].trim();
+        const indentLevel = markdownIndentLevel(m[1] ?? "");
+        const checked = String(m[2] ?? "").toLowerCase() === "x";
+        const content = m[3].trim();
+
         if (content.length > 0) {
           openList("ul");
-          parts.push(`<li class="md-li">${renderInlineCode(content)}</li>`);
+          listItems.push({
+            kind: "html",
+            html: renderTodoItem(content, checked, indentLevel),
+          });
+          continue;
+        }
+      }
+    }
+
+    // unordered list: "- item"
+    {
+      const m = line.match(/^([ \t]*)[-*]\s+(.+)$/);
+      if (m) {
+        const indentLevel = markdownIndentLevel(m[1] ?? "");
+        const content = m[2].trim();
+
+        if (content.length > 0) {
+          openList("ul");
+
+          const cells = splitPreviewColumns(content);
+          if (cells) {
+            listItems.push({
+              kind: "cols",
+              marker: "•",
+              cells,
+              indentLevel,
+            });
+          } else {
+            listItems.push({
+              kind: "html",
+              html: `<li class="md-li"${previewIndentStyle(indentLevel)}>${renderInlineCode(content)}</li>`,
+            });
+          }
+
           continue;
         }
       }
@@ -272,12 +511,31 @@ function renderPreviewMarkdown(text: string): string {
 
     // ordered list: "1. item"
     {
-      const m = line.match(/^\s*(\d+)\.\s+(.+)$/);
+      const m = line.match(/^([ \t]*)(\d+)\.\s+(.+)$/);
       if (m) {
-        const content = m[2].trim();
+        const indentLevel = markdownIndentLevel(m[1] ?? "");
+        const marker = `${m[2]}.`;
+        const value = m[2];
+        const content = m[3].trim();
+
         if (content.length > 0) {
           openList("ol");
-          parts.push(`<li class="md-li">${renderInlineCode(content)}</li>`);
+
+          const cells = splitPreviewColumns(content);
+          if (cells) {
+            listItems.push({
+              kind: "cols",
+              marker,
+              cells,
+              indentLevel,
+            });
+          } else {
+            listItems.push({
+              kind: "html",
+              html: `<li class="md-li" value="${value}"${previewIndentStyle(indentLevel)}>${renderInlineCode(content)}</li>`,
+            });
+          }
+
           continue;
         }
       }
@@ -299,11 +557,6 @@ function renderPreviewMarkdown(text: string): string {
 
   return `<div class="md-preview">${parts.join("\n")}</div>`;
 }
-
-// function renderPreviewText(text: string): string {
-//   const escaped = escapeHtml(text);
-//   return `<pre class="preview-pre">${escaped}</pre>`;
-// }
 
 function memoTitleFromContent(content: string) {
   const first = content.split("\n")[0]?.trim() ?? "";
@@ -362,10 +615,66 @@ function extractPseudoTags(text: string): string[] {
   return Array.from(map.values());
 }
 
-
 const TAB_TITLE_MAX = 12;
 const MAX_TABS = 8;
+const TAB_STOP = 4;
+const TAB_CHAR = "\t";
 
+function getLineStartIndex(value: string, position: number) {
+  return value.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
+}
+
+function getLineEndIndex(value: string, position: number) {
+  const end = value.indexOf("\n", position);
+  return end === -1 ? value.length : end;
+}
+
+function getLeadingWhitespace(line: string): string {
+  return (line.match(/^[ \t]*/) ?? [""])[0];
+}
+
+function getOutdentCharCount(line: string): number {
+  const leading = getLeadingWhitespace(line);
+  if (!leading) return 0;
+
+  // 新方式: まず本物のタブ文字を 1 個単位で戻す
+  if (leading.startsWith(TAB_CHAR)) return 1;
+
+  // 旧データ互換: 既存メモに半角スペース indent がある場合は最大 4 個戻す
+  const spaces = leading.match(/^ {1,4}/)?.[0] ?? "";
+  return spaces.length;
+}
+
+function isMarkdownListLine(line: string): boolean {
+  return /^\s*(?:[-*+]\s+|\d+\.\s+)/.test(line);
+}
+
+function markdownIndentLevel(rawIndent: string): number {
+  let visual = 0;
+
+  for (const ch of rawIndent) {
+    if (ch === "\t") {
+      visual += TAB_STOP;
+      continue;
+    }
+
+    if (ch === " ") {
+      visual += 1;
+    }
+  }
+
+  return Math.floor(visual / TAB_STOP);
+}
+
+function previewIndentStyle(indentLevel: number): string {
+  if (indentLevel <= 0) return "";
+  return ` style="margin-left:${indentLevel * 22}px;"`;
+}
+
+function previewTableIndentStyle(indentLevel: number): string {
+  if (indentLevel <= 0) return "";
+  return ` style="padding-left:${indentLevel * 22}px;"`;
+}
 
 function extractFirstLineTitle(text: string, maxLen: number) {
   const first = (text.split("\n")[0] ?? "").trim();
@@ -386,6 +695,8 @@ let closeTabHandler: (() => Promise<void>) | null = null;
 let switchTabHandler: ((digit: number) => Promise<void>) | null = null;
 let togglePreviewWideHandler: (() => Promise<void>) | null = null;
 
+// let alignIndentShortcutHandler: (() => Promise<void>) | null = null;
+
 let renderTabsHandler: (() => void) | null = null;
 
 // --- List focus / multi-select (Explorer & Dust) ---
@@ -397,6 +708,18 @@ let dustMoveFocusHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
 let dustOpenFocusHandler: (() => Promise<void>) | null = null;
 
 let teardownPanesResize: (() => void) | null = null;
+
+type MemoViewportState = {
+  selectionStart: number;
+  selectionEnd: number;
+  inputScrollTop: number;
+  inputScrollLeft: number;
+  previewScrollTop: number;
+  hadInputFocus: boolean;
+};
+
+const memoViewportStateByTabId = new Map<string, MemoViewportState>();
+let teardownMemoViewportHandlers: (() => void) | null = null;
 
 function isSaveShortcut(e: KeyboardEvent) {
   const keyRow = e.key;
@@ -473,6 +796,17 @@ function isTogglePreviewWideShortcut(e: KeyboardEvent) {
 
   return e.altKey && e.shiftKey && hasMod;
 }
+
+// function isAlignIndentShortcut(e: KeyboardEvent) {
+//   const keyRow = e.key;
+//   const isTab = keyRow === "Tab" || e.code === "Tab";
+//   if (!isTab) return false;
+
+//   const isMac = navigator.platform.toLowerCase().includes("mac");
+//   const hasMod = isMac ? e.metaKey : e.ctrlKey;
+
+//   return e.altKey && e.shiftKey && hasMod;
+// }
 
 function keyConfirm(message: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -780,6 +1114,12 @@ function registerSaveShortcut() {
       return;
     }
 
+    // if (isAlignIndentShortcut(e)) {
+    //   e.preventDefault();
+    //   if (alignIndentShortcutHandler) void alignIndentShortcutHandler();
+    //   return;
+    // }
+
     if (isTogglePreviewWideShortcut(e)) {
       e.preventDefault();
       if (togglePreviewWideHandler) void togglePreviewWideHandler();
@@ -988,26 +1328,85 @@ function mountMemoUI(app: HTMLDivElement) {
   if (!inputPane) throw new Error("input pane not found");
 
   let isPreviewWide = false;
+  let memoInputHadFocus = false;
+
+  const clampSelectionPosition = (value: string, position: number) =>
+    Math.max(0, Math.min(value.length, position));
+
+  const saveActiveMemoViewport = () => {
+    if (state.view !== "editor") return;
+
+    const tab = activeTab();
+    const selectionStart = input.selectionStart ?? 0;
+    const selectionEnd = input.selectionEnd ?? selectionStart;
+
+    memoViewportStateByTabId.set(tab.id, {
+      selectionStart,
+      selectionEnd,
+      inputScrollTop: input.scrollTop,
+      inputScrollLeft: input.scrollLeft,
+      previewScrollTop: preview.scrollTop,
+      hadInputFocus: memoInputHadFocus,
+    });
+  };
+
+  const restoreActiveMemoViewport = (forceFocus = false) => {
+    if (state.view !== "editor") return;
+    if (isPreviewWide) return;
+
+    const tab = activeTab();
+    const saved = memoViewportStateByTabId.get(tab.id);
+
+    if (!saved) {
+      if (forceFocus) input.focus({ preventScroll: true });
+      return;
+    }
+
+    const applyRestore = () => {
+      const start = clampSelectionPosition(input.value, saved.selectionStart);
+      const end = clampSelectionPosition(input.value, saved.selectionEnd);
+      const shouldFocus = forceFocus || saved.hadInputFocus;
+
+      if (shouldFocus) {
+        input.focus({ preventScroll: true });
+      }
+
+      input.setSelectionRange(start, end);
+      input.scrollTop = saved.inputScrollTop;
+      input.scrollLeft = saved.inputScrollLeft;
+
+      const maxPreviewScroll = Math.max(0, preview.scrollHeight - preview.clientHeight);
+      preview.scrollTop = Math.max(
+        0,
+        Math.min(saved.previewScrollTop, maxPreviewScroll)
+      );
+    };
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        applyRestore();
+      });
+    });
+  };
 
   const applyPreviewWide = (on: boolean) => {
-    // Input を隠す（CSSの [hidden] が display:none にする）
-    inputPane.hidden = on;
+    if (on) saveActiveMemoViewport();
 
-    // Preview を全幅化（grid を 1列に）
+    inputPane.hidden = on;
     panes.style.gridTemplateColumns = on ? "1fr" : "";
 
-    // フォーカス事故防止：Input を隠すなら blur、戻すなら focus
     if (on) {
       if (document.activeElement === input) input.blur();
-    } else {
-      input.focus();
+      return;
     }
+
+    restoreActiveMemoViewport(true);
   };
 
   const focusEditorInputIfVisible = () => {
     if (state.view !== "editor") return;
     if (isPreviewWide) return;
-    input.focus();
+    restoreActiveMemoViewport(true);
   };
 
   const focusMemoStart = () => {
@@ -1018,6 +1417,7 @@ function mountMemoUI(app: HTMLDivElement) {
       input.scrollTop = 0;
       input.scrollLeft = 0;
       preview.scrollTop = 0;
+      saveActiveMemoViewport();
     });
   };
   
@@ -1042,30 +1442,21 @@ function mountMemoUI(app: HTMLDivElement) {
   };
   
   const openMemoFromExplorer = async (id: string) => {
-    await saveIfDirty();
-  
+    const tab = activeTab();
+    if (tab.mode !== "explorer") return;
+
     const userId = await requireUserId();
     const memo = await getMemo({ userId, id });
     if (!memo) return;
-  
-    if (state.tabs.length >= MAX_TABS) {
-      showMessage(`Max ${MAX_TABS} tabs — close one to open another memo.`, 3500);
-      return;
-    }
-  
-    const tabId = crypto.randomUUID();
-    state.tabs.push({
-      id: tabId,
-      text: memo.content,
-      dirty: false,
-      currentMemoId: memo.id,
-    });
-    state.activeTabId = tabId;
-  
-    renderEditor();
-    renderTabs();
-    setView("editor");
-    scrollTabIntoView(tabId);
+
+    tab.mode = "editor";
+    tab.currentMemoId = memo.id;
+    tab.text = memo.content;
+    tab.dirty = false;
+    tab.returnToTabId = null;
+
+    await activateTab(tab.id, { skipSaveViewport: true });
+    showMessage(`Opened → ${memoTitleFromContent(memo.content)}`);
     focusMemoStart();
   };
 
@@ -1188,20 +1579,61 @@ function mountMemoUI(app: HTMLDivElement) {
   };
 
 
+// --- tab UX helpers (shortcut switching etc.)
   // --- tab UX helpers (shortcut switching etc.)
-const getTabLabel = (t: TabState) => memoTitleFromContent(t.text);
+  const getTabLabel = (t: TabState) => {
+    if (t.mode === "explorer") return "EXPLORER";
+    if (t.mode === "dust") return "DUST";
+    return memoTitleFromContent(t.text);
+  };
+  
+  // const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") => {
+  //   window.requestAnimationFrame(() => {
+  //     const btn = Array.from(
+  //       tabList.querySelectorAll<HTMLButtonElement>('button[data-tab-id]')
+  //     ).find((b) => b.dataset.tabId === tabId);
 
-const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") => {
-  window.requestAnimationFrame(() => {
-    const btn = Array.from(
-      tabList.querySelectorAll<HTMLButtonElement>('button[data-tab-id]')
-    ).find((b) => b.dataset.tabId === tabId);
+  //     if (!btn) return;
+  //     // Scroll only within the tab list (horizontal)
+  //     btn.scrollIntoView({ behavior, block: "nearest", inline: "nearest" });
+  //   });
+  // };
 
-    if (!btn) return;
-    // Scroll only within the tab list (horizontal)
-    btn.scrollIntoView({ behavior, block: "nearest", inline: "nearest" });
-  });
-};
+  const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") => {
+    window.requestAnimationFrame(() => {
+      const btn = Array.from(
+        tabList.querySelectorAll<HTMLButtonElement>('button[data-tab-id]')
+      ).find((b) => b.dataset.tabId === tabId);
+  
+      if (!btn) return;
+      // Scroll only within the tab list (horizontal)
+      btn.scrollIntoView({ behavior, block: "nearest", inline: "nearest" });
+    });
+  };
+  
+  const createSpecialTab = async (
+    mode: "explorer" | "dust",
+    returnToTabId: string | null
+  ) => {
+    if (state.tabs.length >= MAX_TABS) {
+      showMessage(`Max ${MAX_TABS} tabs — close one to add.`);
+      return false;
+    }
+  
+    const id = crypto.randomUUID();
+    state.tabs.push({
+      id,
+      mode,
+      text: "",
+      dirty: false,
+      currentMemoId: null,
+      returnToTabId,
+    });
+  
+    await activateTab(id);
+    return true;
+  };
+
   newTabHandler = async () => {
     if (state.tabs.length >= MAX_TABS) {
       showMessage(`Max ${MAX_TABS} tabs — close one to add.`);
@@ -1220,14 +1652,8 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     }
   
     if (target.id === state.activeTabId) {
-      // Explorer/Dustにいる場合は「同じタブに戻る＝Editorへ戻る」として扱う
       scrollTabIntoView(target.id);
-      if (state.view !== "editor") {
-        await activateTab(target.id); // setView("editor") が走る → 選択解除も発火
-        showMessage(`Back → Tab ${digit}: ${getTabLabel(target)}`);
-      } else {
-        showMessage(`Already on Tab ${digit}: ${getTabLabel(target)}`);
-      }
+      showMessage(`Already on Tab ${digit}: ${getTabLabel(target)}`);
       return;
     }
   
@@ -1261,8 +1687,14 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
       const prefix = key ? `${key}: ` : "";
       const baseMax = key ? Math.max(6, TAB_TITLE_MAX - prefix.length) : TAB_TITLE_MAX;
 
-      const baseLabel = extractFirstLineTitle(t.text, baseMax);
-      const dirtyMark = t.dirty ? " *" : "";
+      const baseLabel =
+        t.mode === "explorer"
+          ? "EXPLORER"
+          : t.mode === "dust"
+            ? "DUST"
+            : extractFirstLineTitle(t.text, baseMax);
+
+      const dirtyMark = t.mode === "editor" && t.dirty ? " *" : "";
       const display = `${prefix}${baseLabel}${dirtyMark}`;
 
       const isActive = t.id === state.activeTabId;
@@ -1285,20 +1717,41 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     .join("");
   }
   
-    // expose to global shortcuts (save / auto-update) to refresh the "*" mark
+  // expose to global shortcuts (save / auto-update) to refresh the "*" mark
   renderTabsHandler = renderTabs;
 
-  async function activateTab(tabId: string) {
-    // タブ切替時に「保存したい」ならここに saveIfDirty() を入れる
-    state.activeTabId = tabId;
-    renderEditor();     // active tab の内容を editor に流し込む
-    renderTabs();       // active 表示更新
-    setView("editor");
-    scrollTabIntoView(tabId);
-    // input.focus();
-    focusEditorInputIfVisible();
-  }
+  async function activateTab(
+    tabId: string,
+    options?: { skipSaveViewport?: boolean }
+  ) {
+    if (!options?.skipSaveViewport) {
+      saveActiveMemoViewport();
+    }
 
+    const tab = state.tabs.find((x) => x.id === tabId);
+    if (!tab) throw new Error("tab not found");
+
+    state.activeTabId = tabId;
+
+    if (tab.mode === "editor") {
+      renderEditor();
+      renderTabs();
+      setView("editor");
+      scrollTabIntoView(tabId);
+      focusEditorInputIfVisible();
+      return;
+    }
+
+    renderTabs();
+    setView(tab.mode);
+    scrollTabIntoView(tabId);
+
+    if (tab.mode === "explorer") {
+      await loadExplorer();
+    } else {
+      await loadDust();
+    }
+  }
 
   async function createNewTab() {
     if (state.tabs.length >= MAX_TABS) {
@@ -1307,7 +1760,14 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
     }
 
     const id = crypto.randomUUID();
-    state.tabs.push({ id, text: DEFAULT_TEXT, dirty: false, currentMemoId: null });
+    state.tabs.push({
+      id,
+      mode: "editor",
+      text: DEFAULT_TEXT,
+      dirty: false,
+      currentMemoId: null,
+      returnToTabId: null,
+    });
     await activateTab(id);
   }
   
@@ -1349,6 +1809,10 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
   function setView(view: ViewMode) {
     const prev = state.view;
 
+    if (prev === "editor" && view !== "editor") {
+      saveActiveMemoViewport();
+    }
+
     // Clear list selections when leaving Explorer/Dust
     if (prev === "explorer" && view !== "explorer") {
       if (state.explorerSelectedIds.size > 0) {
@@ -1357,6 +1821,7 @@ const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") =
         updateExplorerStateText();
       }
     }
+
     if (prev === "dust" && view !== "dust") {
       if (state.dustSelectedIds.size > 0) {
         state.dustSelectedIds.clear();
@@ -1674,7 +2139,16 @@ tagSuggest.addEventListener("click", (ev) => {
   applyTagSuggestion(entry);
 });
 
-input.addEventListener("blur", () => closeTagSuggest());
+input.addEventListener("blur", () => {
+  closeTagSuggest();
+  saveActiveMemoViewport();
+  memoInputHadFocus = false;
+});
+
+input.addEventListener("blur", () => {
+  closeTagSuggest();
+  saveActiveMemoViewport();
+});
 
 input.addEventListener("keydown", (e) => {
   if (tagSuggest.hidden) return;
@@ -1718,17 +2192,231 @@ input.addEventListener("keydown", (e) => {
 // Update suggestions when caret moves (←/→) or user clicks inside textarea
 input.addEventListener("keyup", () => updateTagSuggest());
 input.addEventListener("click", () => updateTagSuggest());
+
+const indentSelectedLines = (value: string, selectionStart: number, selectionEnd: number) => {
+  const blockStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+  const blockEnd = value.indexOf("\n", selectionEnd);
+  const safeBlockEnd = blockEnd === -1 ? value.length : blockEnd;
+
+  const block = value.slice(blockStart, safeBlockEnd);
+  const lines = block.split("\n");
+
+  let offset = 0;
+  let startShift = 0;
+  let endShift = 0;
+
+  const indentedLines = lines.map((line) => {
+    const absLineStart = blockStart + offset;
+    offset += line.length + 1;
+
+    if (absLineStart < selectionStart) {
+      startShift += TAB_CHAR.length;
+    }
+
+    if (absLineStart < selectionEnd) {
+      endShift += TAB_CHAR.length;
+    }
+
+    return TAB_CHAR + line;
+  });
+
+  const nextValue =
+    value.slice(0, blockStart) +
+    indentedLines.join("\n") +
+    value.slice(safeBlockEnd);
+
+  return {
+    value: nextValue,
+    selectionStart: selectionStart + startShift,
+    selectionEnd: selectionEnd + endShift,
+  };
+};
+
+const outdentSelectedLines = (value: string, selectionStart: number, selectionEnd: number) => {
+  const blockStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+  const blockEnd = value.indexOf("\n", selectionEnd);
+  const safeBlockEnd = blockEnd === -1 ? value.length : blockEnd;
+
+  const block = value.slice(blockStart, safeBlockEnd);
+  const lines = block.split("\n");
+
+  let removedBeforeStart = 0;
+  let removedTotal = 0;
+
+  const outdentedLines = lines.map((line, index) => {
+    const removeCount = getOutdentCharCount(line);
+
+    if (index === 0) {
+      const offsetIntoFirstLine = Math.max(0, selectionStart - blockStart);
+      removedBeforeStart = Math.min(removeCount, offsetIntoFirstLine);
+    }
+
+    removedTotal += removeCount;
+    return line.slice(removeCount);
+  });
+
+  const nextValue = value.slice(0, blockStart) + outdentedLines.join("\n") + value.slice(safeBlockEnd);
+
+  return {
+    value: nextValue,
+    selectionStart: Math.max(blockStart, selectionStart - removedBeforeStart),
+    selectionEnd: Math.max(blockStart, selectionEnd - removedTotal),
+  };
+};
+
+const applyTextareaEdit = (nextValue: string, nextSelectionStart: number, nextSelectionEnd: number) => {
+  pushTextareaUndoSnapshot();
+
+  isApplyingTextareaProgrammaticEdit = true;
+
+  input.value = nextValue;
+  input.focus();
+  input.setSelectionRange(nextSelectionStart, nextSelectionEnd);
+
+  input.dispatchEvent(
+    new InputEvent("input", {
+      bubbles: true,
+      inputType: "insertText",
+      data: null,
+    })
+  );
+
+  isApplyingTextareaProgrammaticEdit = false;
+};
+
+input.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented) return;
+  if (state.view !== "editor") return;
+  if ((e as any).isComposing) return;
+  if (!isTextareaUndoShortcut(e)) return;
+
+  const snapshot = textareaUndoStack.pop();
+  if (!snapshot) return; // 通常のブラウザ undo に任せる
+
+  e.preventDefault();
+  restoreTextareaUndoSnapshot(snapshot);
+});
+
+type TextareaUndoSnapshot = {
+  value: string;
+  selectionStart: number;
+  selectionEnd: number;
+  scrollTop: number;
+  scrollLeft: number;
+};
+
+const textareaUndoStack: TextareaUndoSnapshot[] = [];
+let isApplyingTextareaProgrammaticEdit = false;
+
+function pushTextareaUndoSnapshot() {
+  textareaUndoStack.push({
+    value: input.value,
+    selectionStart: input.selectionStart ?? 0,
+    selectionEnd: input.selectionEnd ?? input.selectionStart ?? 0,
+    scrollTop: input.scrollTop,
+    scrollLeft: input.scrollLeft,
+  });
+
+  // Tab 操作用の軽量 undo なので、保持しすぎない
+  if (textareaUndoStack.length > 50) {
+    textareaUndoStack.shift();
+  }
+}
+
+function restoreTextareaUndoSnapshot(snapshot: TextareaUndoSnapshot) {
+  isApplyingTextareaProgrammaticEdit = true;
+
+  input.value = snapshot.value;
+  input.focus();
+  input.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+  input.scrollTop = snapshot.scrollTop;
+  input.scrollLeft = snapshot.scrollLeft;
+
+  input.dispatchEvent(
+    new InputEvent("input", {
+      bubbles: true,
+      inputType: "historyUndo",
+    })
+  );
+
+  isApplyingTextareaProgrammaticEdit = false;
+}
+
+function isTextareaUndoShortcut(e: KeyboardEvent): boolean {
+  const key = typeof e.key === "string" ? e.key.toLowerCase() : "";
+  if (key !== "z") return false;
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasUndoMod = isMac ? e.metaKey : e.ctrlKey;
+
+  return hasUndoMod && !e.altKey && !e.shiftKey;
+}
+
+input.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented) return;
+  if (state.view !== "editor") return;
+  if ((e as any).isComposing) return;
+  if (e.key !== "Tab") return;
+
+  e.preventDefault();
+
+  const selectionStart = input.selectionStart ?? 0;
+  const selectionEnd = input.selectionEnd ?? selectionStart;
+  const value = input.value;
+
+  if (selectionStart === selectionEnd) {
+    if (e.shiftKey) return;
+
+    const lineStart = getLineStartIndex(value, selectionStart);
+    const lineEnd = getLineEndIndex(value, selectionStart);
+    const line = value.slice(lineStart, lineEnd);
+
+    // 箇条書き行では、カーソル位置ではなく行頭にタブを入れて入れ子化する
+    if (isMarkdownListLine(line)) {
+      const nextValue =
+        value.slice(0, lineStart) +
+        TAB_CHAR +
+        value.slice(lineStart);
+
+      const nextCaret = selectionStart + TAB_CHAR.length;
+      applyTextareaEdit(nextValue, nextCaret, nextCaret);
+      return;
+    }
+
+    // 通常行では、本物のタブ文字を 1 個だけ挿入する
+    const nextValue =
+      value.slice(0, selectionStart) +
+      TAB_CHAR +
+      value.slice(selectionEnd);
+
+    const nextCaret = selectionStart + TAB_CHAR.length;
+    applyTextareaEdit(nextValue, nextCaret, nextCaret);
+    return;
+  }
+
+  const edit = e.shiftKey
+    ? outdentSelectedLines(value, selectionStart, selectionEnd)
+    : indentSelectedLines(value, selectionStart, selectionEnd);
+
+  applyTextareaEdit(edit.value, edit.selectionStart, edit.selectionEnd);
+});
+
   // ---- renderers
   function renderEditor() {
     const tab = activeTab();
+    const savedViewport = memoViewportStateByTabId.get(tab.id);
+
     input.value = tab.text;
     preview.innerHTML = renderPreviewMarkdown(tab.text);
-    preview.scrollTop = 0;
-  
+    preview.scrollTop = savedViewport?.previewScrollTop ?? 0;
+
     if (tab.dirty) msgText.textContent = "Unsaved";
-    else if (!msgText.textContent || msgText.textContent === "Unsaved") msgText.textContent = "";
-  
+    else if (!msgText.textContent || msgText.textContent === "Unsaved") {
+      msgText.textContent = "";
+    }
+
     renderPseudoTags(tab.text);
+    restoreActiveMemoViewport(false);
   }
 
   function renderExplorer(list: MemoRow[]) {
@@ -1773,6 +2461,7 @@ input.addEventListener("click", () => updateTagSuggest());
         const title = escapeHtml(memoTitleFromContent(m.content));
         const snippet = escapeHtml(memoSnippet(m.content));
         const trashed = formatYmd(m.deleted_at);
+        const size = formatBytes(memoSizeBytes(m.content));
         const id = escapeHtml(m.id);
         return `
           <li class="memo-item" data-id="${id}" style="border:1px solid #e3e6ea; border-radius:12px; padding:10px; margin-bottom:10px;">
@@ -1781,6 +2470,7 @@ input.addEventListener("click", () => updateTagSuggest());
               <div style="font-weight:700;">${title}</div>
               <div style="font-size:12px; color:#666; margin-top:6px;">
                 <div>Trashed Date: ${trashed}</div>
+                <div>Size:         ${size}</div>
               </div>
               <div style="font-size:12px; color:#333; margin-top:6px;">${snippet}</div>
             </button>
@@ -1995,19 +2685,40 @@ input.addEventListener("click", () => updateTagSuggest());
 
 
   input.addEventListener("input", () => {
+    if (!isApplyingTextareaProgrammaticEdit) {
+      textareaUndoStack.length = 0;
+    }
+
     activeTab().text = input.value;
     setDirty(true);
     preview.innerHTML = renderPreviewMarkdown(activeTab().text);
     renderPseudoTags(input.value);
     renderTabs();
     syncPreviewToCaret();
+    saveActiveMemoViewport();
   });
 
   // Tag autocomplete
   input.addEventListener("input", () => updateTagSuggest());
-  input.addEventListener("click", () => syncPreviewToCaret());
-  input.addEventListener("keyup", () => syncPreviewToCaret());
-  input.addEventListener("scroll", () => syncPreviewToCaret());
+  
+  input.addEventListener("click", () => {
+    syncPreviewToCaret();
+    saveActiveMemoViewport();
+  });
+
+  input.addEventListener("keyup", () => {
+    syncPreviewToCaret();
+    saveActiveMemoViewport();
+  });
+
+  input.addEventListener("scroll", () => {
+    syncPreviewToCaret();
+    saveActiveMemoViewport();
+  });
+
+  input.addEventListener("select", () => {
+    saveActiveMemoViewport();
+  });
 
   memoList.addEventListener("click", async (ev) => {
     const target = ev.target as HTMLElement | null;
@@ -2075,6 +2786,87 @@ input.addEventListener("click", () => updateTagSuggest());
     }
   });
 
+  // ---- wire dust (erase forever / restore)
+  dustList.addEventListener("click", async (ev) => {
+    const target = ev.target as HTMLElement | null;
+    const btn = target?.closest<HTMLButtonElement>("button.memo-row");
+    const id = btn?.dataset.id;
+    if (!id) return;
+    
+    // Keep a stable keyboard focus point for ↑/↓ and Space
+    state.dustFocusId = id;
+    syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
+    scrollFocusIntoView(dustList, state.dustFocusId, "auto");
+
+    try {
+      const userId = await requireUserId();
+      const memo = await getMemo({ userId, id });
+      if (!memo) return;
+
+      const title = memoTitleFromContent(memo.content);
+      const decision = await keyConfirmDust(
+        `"${title}"\n\nErase forever? (Y)\nRestore to Explorer? (N)`
+      );
+
+      if (decision === "erase") {
+        await hardDeleteMemo({ userId, id });
+
+        showMessage("Deleted forever 🔥");
+        await loadDust();       // Dust を再描画
+        setView("dust");
+        return;
+      }
+
+      if (decision === "restore") {
+        await restoreMemo({ userId, id });
+
+        showMessage("Restored ✨");
+        await goExplorer();     // Explorer を開いて一覧を再描画
+        setView("dust");
+
+        void loadExplorer();
+        return;
+      }
+
+      showMessage("Canceled.");
+    } catch (e) {
+      console.error(e);
+      showMessage("Oops — action failed 😵‍💫", 2500);
+    }
+  });
+  
+  async function openExplorerTabByShortcut() {
+    const session = await getSession();
+    if (!session) {
+      showMessage("Explorer を使うには Sign in が必要です。", 4500);
+      openAccountScreen("signin");
+      return;
+    }
+
+    const returnToTabId = state.activeTabId;
+    const r = await autoUpdateIfEditingCurrentMemo();
+    const opened = await createSpecialTab("explorer", returnToTabId);
+    if (!opened) return;
+
+    showMessage(r === "updated" ? "Updated ✨ — Explorer tab opened" : "Explorer tab opened");
+  }
+  
+  async function openDustTabByShortcut() {
+    const session = await getSession();
+    if (!session) {
+      showMessage("Dust を使うには Sign in が必要です。", 4500);
+      openAccountScreen("signin");
+      return;
+    }
+
+    const returnToTabId = state.activeTabId;
+    const r = await autoUpdateIfEditingCurrentMemo();
+    const opened = await createSpecialTab("dust", returnToTabId);
+    if (!opened) return;
+
+    showMessage(r === "updated" ? "Updated ✨ — Dust tab opened" : "Dust tab opened");
+  }
+
   async function goExplorer() {
     const session = await getSession();
     if (!session) {
@@ -2105,8 +2897,8 @@ input.addEventListener("click", () => updateTagSuggest());
     await loadDust();
   }
 
-  goExplorerHandler = goExplorer;
-  goDustHandler = goDust;
+  goExplorerHandler = openExplorerTabByShortcut;
+  goDustHandler = openDustTabByShortcut;
   
   // keyboard handlers for list focus / selection / open
   explorerSelectToggleHandler = async () => {
@@ -2156,39 +2948,24 @@ input.addEventListener("click", () => updateTagSuggest());
       const memo = await getMemo({ userId, id });
       if (!memo) return;
 
-      activeTab().currentMemoId = memo.id;
-      activeTab().text = memo.content;
-      setDirty(false);
+      const tab = activeTab();
+      tab.mode = "editor";
+      tab.currentMemoId = memo.id;
+      tab.text = memo.content;
+      tab.dirty = false;
+      tab.returnToTabId = null;
 
-      renderEditor();
-      renderTabs();
-      setView("editor");
+      await activateTab(tab.id, { skipSaveViewport: true });
+      focusMemoStart();
     } catch (e) {
       console.error(e);
     }
   };
 
   closeTabHandler = async () => {
-    const viewBefore = state.view;
-  
     try {
       const tab = activeTab();
-      const title = extractFirstLineTitle(tab.text, TAB_TITLE_MAX);
-  
-      // 未保存なら保存してから閉じる
-      // const needsSave = tab.dirty || (tab.currentMemoId === null && tab.text.trim() !== "");
-      // if (needsSave) {
-      //   const userId = await requireUserId();
-  
-      //   if (tab.currentMemoId) {
-      //     await updateMemo({ userId, id: tab.currentMemoId, content: tab.text });
-      //   } else {
-      //     const created = await createMemo({ userId, content: tab.text });
-      //     tab.currentMemoId = created.id;
-      //   }
-  
-      //   tab.dirty = false;
-      // }
+      const title = getTabLabel(tab);
   
       // 未保存なら保存してから閉じる
       // 新規タブ（currentMemoId === null）の場合、DEFAULT_TEXTのまま or 白紙なら保存しない
@@ -2196,47 +2973,55 @@ input.addEventListener("click", () => updateTagSuggest());
       const isNew = tab.currentMemoId === null;
       const isBlankDraft = isNew && norm(tab.text) === "";
       const isDefaultDraft = isNew && norm(tab.text) === norm(DEFAULT_TEXT);
-      const needsSave = isNew ? (!isBlankDraft && !isDefaultDraft) : tab.dirty;
+      const needsSave =
+        tab.mode === "editor" &&
+        (isNew ? (!isBlankDraft && !isDefaultDraft) : tab.dirty);
 
       const idx = state.tabs.findIndex((t) => t.id === tab.id);
       if (idx < 0) return;
   
       // 最後の1枚なら「空の新規タブ」に置き換える
       if (state.tabs.length === 1) {
+        memoViewportStateByTabId.delete(tab.id);
         const newId = crypto.randomUUID();
-        state.tabs = [{ id: newId, text: "", dirty: false, currentMemoId: null }];
+        state.tabs = [{
+          id: newId,
+          mode: "editor",
+          text: "",
+          dirty: false,
+          currentMemoId: null,
+          returnToTabId: null,
+        }];
         state.activeTabId = newId;
   
-        renderEditor();
-        renderTabs();
-        setView(viewBefore);
-        // if (viewBefore === "editor") input.focus();
-        if (viewBefore === "editor") focusEditorInputIfVisible();
+        await activateTab(newId, { skipSaveViewport: true });
   
         showMessage(needsSave ? `Saved & closed: ${title}` : `Closed: ${title}`);
         return;
       }
   
-      // タブ削除 → 次のアクティブを決定
+      const returnToTabId = tab.returnToTabId;
+
+      // タブ削除
+      memoViewportStateByTabId.delete(tab.id);
       state.tabs.splice(idx, 1);
-      const next = state.tabs[Math.max(0, idx - 1)];
+
+      const next =
+        (returnToTabId
+          ? state.tabs.find((t) => t.id === returnToTabId) ?? null
+          : null) ??
+        state.tabs[Math.max(0, idx - 1)];
+
       state.activeTabId = next.id;
   
-      // 表示更新（ビューは維持）
-      renderTabs();
-      if (viewBefore === "editor") {
-        renderEditor();
-        // input.focus();
-        focusEditorInputIfVisible();
-      }
-      setView(viewBefore);
+      await activateTab(next.id, { skipSaveViewport: true });
   
       showMessage(needsSave ? `Saved & closed: ${title}` : `Closed: ${title}`);
     } catch (err) {
       console.error("close tab failed", err);
       showMessage("Oops — close tab failed 😵‍💫", 2500);
     }
-  }; 
+  };
   
   deleteMemoHandler = async () => {
     // Explorer: move selected memos to Dust
@@ -2345,6 +3130,7 @@ input.addEventListener("click", () => updateTagSuggest());
       tab.currentMemoId = null;
       tab.text = "";
       tab.dirty = false;
+      memoViewportStateByTabId.delete(tab.id);
   
       renderEditor();
       renderTabs();
@@ -2405,7 +3191,8 @@ input.addEventListener("click", () => updateTagSuggest());
 
   void refreshHeaderAuthUi();
 
-  // ★ DOM生成後、state.view を必ず反映する
+  // ★ DOM生成後、active tab の mode を必ず反映する
+  state.view = activeTab().mode;
   setView(state.view);
 
   void (async () => {
@@ -2421,7 +3208,48 @@ input.addEventListener("click", () => updateTagSuggest());
       void loadDust();
     }
   })();
-    
+
+  const restoreMemoViewportAfterActivation = () => {
+    if (state.view !== "editor") return;
+    if (isPreviewWide) return;
+
+    const saved = memoViewportStateByTabId.get(activeTab().id);
+    const shouldFocus = !!saved?.hadInputFocus;
+
+    window.setTimeout(() => {
+      restoreActiveMemoViewport(shouldFocus);
+    }, 0);
+  };
+
+  const handleWindowBlur = () => {
+    saveActiveMemoViewport();
+  };
+
+  const handleWindowFocus = () => {
+    restoreMemoViewportAfterActivation();
+  };
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "hidden") {
+      saveActiveMemoViewport();
+      return;
+    }
+
+    if (document.visibilityState === "visible") {
+      restoreMemoViewportAfterActivation();
+    }
+  };
+
+  window.addEventListener("blur", handleWindowBlur);
+  window.addEventListener("focus", handleWindowFocus);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
+  teardownMemoViewportHandlers = () => {
+    window.removeEventListener("blur", handleWindowBlur);
+    window.removeEventListener("focus", handleWindowFocus);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+  };
+
   registerSaveShortcut();
 }
 
@@ -2432,6 +3260,22 @@ function formatAuthErrorMessage(error: unknown): string {
       : String(error ?? "");
 
   const normalized = raw.trim().toLowerCase();
+
+  if (normalized.includes("failed to send a request to the edge function")) {
+    return "サーバーとの通信に失敗しました。時間をおいて再度お試しください。";
+  }
+
+  if (
+    normalized.includes("edge function returned a non-2xx status code") ||
+    normalized.includes("function returned an error") ||
+    normalized.includes("functionshttperror")
+  ) {
+    return "サインアップ確認処理でエラーが発生しました。設定またはサーバー状態を確認してください。";
+  }
+
+  if (normalized.includes("failed to fetch")) {
+    return "ネットワーク通信に失敗しました。接続状況を確認して再度お試しください。";
+  }
 
   if (normalized.includes("invalid login credentials")) {
     return "メールアドレスまたはパスワードが正しくありません。";
@@ -2472,9 +3316,44 @@ const TERMS_VERSION = "v1";
 const PRIVACY_VERSION = "v1";
 const PENDING_SIGNUP_STORAGE_KEY = "typingnote.pending-signup";
 
+const PASSWORD_RESET_EMAIL_STORAGE_KEY = "typingnote.password-reset-email";
+let forceSignedOutScreen: "memo" | "auth" | null = null;
+
+function savePasswordResetEmail(email: string) {
+  if (!canUseLocalStorage()) return;
+  localStorage.setItem(PASSWORD_RESET_EMAIL_STORAGE_KEY, email.trim());
+}
+
+function loadPasswordResetEmail(): string {
+  if (!canUseLocalStorage()) return "";
+  return localStorage.getItem(PASSWORD_RESET_EMAIL_STORAGE_KEY) ?? "";
+}
+
+function clearPasswordResetEmail() {
+  if (!canUseLocalStorage()) return;
+  localStorage.removeItem(PASSWORD_RESET_EMAIL_STORAGE_KEY);
+}
+
 let authMode: "normal" | "recovery" = "normal";
-let appScreen: "memo" | "auth" | "signup" | "signupOtp" = "memo";
+
+let appScreen:
+  | "memo"
+  | "auth"
+  | "signup"
+  | "signupOtp"
+  | "forgotPassword"
+  | "terms"
+  | "privacy" = "memo";
+
+let legalBackScreen:
+  | "memo"
+  | "auth"
+  | "signup"
+  | "signupOtp"
+  | "forgotPassword" = "memo";
+
 let authFlashKind: "info" | "error" = "error";
+
 let suppressSignedInRerender = false;
 
 function resetScreenHandlers() {
@@ -2486,7 +3365,14 @@ function resetScreenHandlers() {
   closeTabHandler = null;
   switchTabHandler = null;
   togglePreviewWideHandler = null;
+  // alignIndentShortcutHandler = null;
   renderTabsHandler = null;
+
+  teardownPanesResize?.();
+  teardownPanesResize = null;
+
+  teardownMemoViewportHandlers?.();
+  teardownMemoViewportHandlers = null;
 }
 
 function openAccountScreen(intent: "signin" | "signup", message = "", kind: "info" | "error" = "error") {
@@ -2495,10 +3381,25 @@ function openAccountScreen(intent: "signin" | "signup", message = "", kind: "inf
   rerender(message).catch(console.error);
 }
 
+function openForgotPasswordScreen(
+  message = "",
+  kind: "info" | "error" = "error"
+) {
+  authFlashKind = kind;
+  appScreen = "forgotPassword";
+  rerender(message).catch(console.error);
+}
+
 function openSignupOtpScreen(message = "", kind: "info" | "error" = "info") {
   authFlashKind = kind;
   appScreen = "signupOtp";
   rerender(message).catch(console.error);
+}
+
+function openLegalScreen(kind: "terms" | "privacy", backTo: "memo" | "auth" | "signup" | "signupOtp") {
+  legalBackScreen = backTo;
+  appScreen = kind;
+  rerender().catch(console.error);
 }
 
 function canUseLocalStorage() {
@@ -2588,18 +3489,20 @@ function mountSignUpUI(app: HTMLDivElement, message = "") {
   const submitBtn = qs<HTMLButtonElement>("#signupSubmitBtn");
   const backBtn = qs<HTMLButtonElement>("#signupBackBtn");
   const topBtn = qs<HTMLButtonElement>("#signupTopBtn");
+  const openTermsBtn = qs<HTMLButtonElement>("#openTermsBtn");
+  const openPrivacyBtn = qs<HTMLButtonElement>("#openPrivacyBtn");
 
-  const draft = loadPendingSignUpDraft();
-  if (draft) {
-    displayNameEl.value = draft.displayName;
-    familyNameEl.value = draft.familyName;
-    givenNameEl.value = draft.givenName;
-    emailEl.value = draft.email;
-    passEl.value = draft.password;
-    pass2El.value = draft.password;
-    agreeTermsEl.checked = !!draft.agreedTermsAt;
-    agreePrivacyEl.checked = !!draft.agreedPrivacyAt;
-  }
+  // const draft = loadPendingSignUpDraft();
+  // if (draft) {
+  //   displayNameEl.value = draft.displayName;
+  //   familyNameEl.value = draft.familyName;
+  //   givenNameEl.value = draft.givenName;
+  //   emailEl.value = draft.email;
+  //   passEl.value = draft.password;
+  //   pass2El.value = draft.password;
+  //   agreeTermsEl.checked = !!draft.agreedTermsAt;
+  //   agreePrivacyEl.checked = !!draft.agreedPrivacyAt;
+  // }
 
   const setMsg = (t: string, kind: "info" | "error" = "error") => {
     if (!t) {
@@ -2653,6 +3556,12 @@ function mountSignUpUI(app: HTMLDivElement, message = "") {
       setMsg("Password と Confirm password が一致していません。", "error");
       return;
     }
+    
+    const passwordErrors = validatePassword(password);
+    if (passwordErrors.length > 0) {
+      setMsg(`Password の条件を満たしていません: ${passwordErrors.join("、")}`, "error");
+      return;
+    }
 
     if (!agreeTermsEl.checked || !agreePrivacyEl.checked) {
       setMsg("利用規約とプライバシーポリシーへの同意が必要です。", "error");
@@ -2674,10 +3583,25 @@ function mountSignUpUI(app: HTMLDivElement, message = "") {
 
     try {
       setBusy(true);
-      setMsg("認証コードを送信しています...", "info");
-      await requestSignUpOtp(nextDraft);
-      savePendingSignUpDraft(nextDraft);
-      openSignupOtpScreen("認証コードをメールで送信しました。メールに届いた 8 桁コードを入力してください。", "info");
+      setMsg("メールアドレスを確認しています...", "info");
+    
+      const result = await beginSignUp(nextDraft);
+    
+      if (result.status === "already_registered") {
+        setMsg(result.message, "error");
+        return;
+      }
+    
+      if (result.status === "otp_sent") {
+        savePendingSignUpDraft(nextDraft);
+        openSignupOtpScreen(
+          "認証コードをメールで送信しました。メールに届いた 8 桁コードを入力してください。",
+          "info"
+        );
+        return;
+      }
+    
+      setMsg(result.message || "認証コードの送信に失敗しました。", "error");
     } catch (err: any) {
       console.error(err);
       setMsg(formatAuthErrorMessage(err), "error");
@@ -2693,6 +3617,14 @@ function mountSignUpUI(app: HTMLDivElement, message = "") {
   topBtn.addEventListener("click", async () => {
     appScreen = "memo";
     await rerender();
+  });
+
+  openTermsBtn.addEventListener("click", () => {
+    openLegalScreen("terms", "signup");
+  });
+  
+  openPrivacyBtn.addEventListener("click", () => {
+    openLegalScreen("privacy", "signup");
   });
 }
 
@@ -2793,16 +3725,16 @@ function mountSignUpOtpUI(app: HTMLDivElement, message = "") {
     }
   });
 
-  backBtn.addEventListener("click", async () => {
-    if (busy) return;
-    openAccountScreen("signup");
-  });
+  // backBtn.addEventListener("click", async () => {
+  //   if (busy) return;
+  //   openAccountScreen("signup");
+  // });
 
-  topBtn.addEventListener("click", async () => {
-    if (busy) return;
-    appScreen = "memo";
-    await rerender();
-  });
+  // topBtn.addEventListener("click", async () => {
+  //   if (busy) return;
+  //   appScreen = "memo";
+  //   await rerender();
+  // });
 }
 
 function mountAuthUI(app: HTMLDivElement, message = "") {
@@ -2817,6 +3749,13 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
   const signinBtn = qs<HTMLButtonElement>("#signinBtn");
   const forgotBtn = qs<HTMLButtonElement>("#forgotBtn");
   const backToTopBtn = qs<HTMLButtonElement>("#backToTopBtn");
+  const openTermsFromAuthBtn = qs<HTMLButtonElement>("#openTermsFromAuthBtn");
+  const openPrivacyFromAuthBtn = qs<HTMLButtonElement>("#openPrivacyFromAuthBtn");
+
+  const savedResetEmail = loadPasswordResetEmail();
+  if (savedResetEmail && !emailEl.value) {
+    emailEl.value = savedResetEmail;
+  }
 
   const setMsg = (t: string, kind: "info" | "error" = "error") => {
     if (!t) {
@@ -2903,65 +3842,196 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
   });
 
   forgotBtn.addEventListener("click", async () => {
-    try {
-      const email = emailEl.value.trim();
-      if (!email) return setMsg("Email を入力してください。", "error");
-
-      setBusy(true);
-
-      const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
-      if (error) throw error;
-
-      setMsg("リセットメールを送信しました。メールのリンクを開いてください。", "info");
-    } catch (e: any) {
-      console.error(e);
-      setMsg(formatAuthErrorMessage(e), "error");
-    } finally {
-      setBusy(false);
-    }
+    if (busy) return;
+  
+    const email = emailEl.value.trim();
+    if (email) savePasswordResetEmail(email);
+  
+    openForgotPasswordScreen();
   });
 
   backToTopBtn.addEventListener("click", async () => {
     appScreen = "memo";
     await rerender();
   });
+
+  openTermsFromAuthBtn.addEventListener("click", () => {
+    openLegalScreen("terms", "auth");
+  });
+  
+  openPrivacyFromAuthBtn.addEventListener("click", () => {
+    openLegalScreen("privacy", "auth");
+  });
 }
 
-// let authMode: "normal" | "recovery" = "normal";
-// let appScreen: "memo" | "auth" = "memo";
-// let authScreenIntent: "signin" | "signup" = "signin";
+function mountForgotPasswordUI(app: HTMLDivElement, message = "") {
+  resetScreenHandlers();
+  app.innerHTML = forgotPasswordUIHtml;
+
+  const msgEl = qs<HTMLDivElement>("#forgotPasswordMsg");
+  const form = qs<HTMLFormElement>("#forgotPasswordForm");
+  const emailEl = qs<HTMLInputElement>("#forgotPasswordEmail");
+  const submitBtn = qs<HTMLButtonElement>("#forgotPasswordSubmitBtn");
+  const backBtn = qs<HTMLButtonElement>("#forgotPasswordBackBtn");
+  const topBtn = qs<HTMLButtonElement>("#forgotPasswordTopBtn");
+
+  const setMsg = (t: string, kind: "info" | "error" = "error") => {
+    if (!t) {
+      msgEl.hidden = true;
+      msgEl.textContent = "";
+      return;
+    }
+    msgEl.hidden = false;
+    msgEl.textContent = t;
+    msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
+  };
+
+  emailEl.value = loadPasswordResetEmail();
+
+  if (message) setMsg(message, authFlashKind);
+  else setMsg("");
+
+  let busy = false;
+  const setBusy = (v: boolean) => {
+    busy = v;
+    submitBtn.disabled = v;
+    backBtn.disabled = v;
+    topBtn.disabled = v;
+    emailEl.disabled = v;
+  };
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (busy) return;
+
+    const email = emailEl.value.trim();
+    if (!email) {
+      setMsg("メールアドレスを入力してください。", "error");
+      return;
+    }
+
+    try {
+      setBusy(true);
+      setMsg("再設定リンクを送信しています...", "info");
+
+      savePasswordResetEmail(email);
+
+      const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+      if (error) throw error;
+
+      setMsg(
+        "パスワード再設定用リンクを送信しました。\nメール内のリンクを開いて、新しいパスワードを設定してください。",
+        "info"
+      );
+    } catch (err: any) {
+      console.error(err);
+      setMsg(formatAuthErrorMessage(err), "error");
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  backBtn.addEventListener("click", async () => {
+    openAccountScreen("signin");
+  });
+
+  topBtn.addEventListener("click", async () => {
+    appScreen = "memo";
+    await rerender();
+  });
+}
+
+function mountTermsUI(app: HTMLDivElement) {
+  resetScreenHandlers();
+  app.innerHTML = termsUIHtml;
+
+  const backBtn = qs<HTMLButtonElement>("#termsBackBtn");
+  backBtn.addEventListener("click", async () => {
+    appScreen = legalBackScreen;
+    await rerender();
+  });
+}
+
+function mountPrivacyUI(app: HTMLDivElement) {
+  resetScreenHandlers();
+  app.innerHTML = privacyUIHtml;
+
+  const backBtn = qs<HTMLButtonElement>("#privacyBackBtn");
+  backBtn.addEventListener("click", async () => {
+    appScreen = legalBackScreen;
+    await rerender();
+  });
+}
 
 function mountResetPasswordUI(app: HTMLDivElement) {
-
+  resetScreenHandlers();
   app.innerHTML = resetPasswordUIHtml;
 
   const msg = qs<HTMLDivElement>("#resetMsg");
   const p1 = qs<HTMLInputElement>("#newPassword");
   const p2 = qs<HTMLInputElement>("#newPassword2");
   const form = qs<HTMLFormElement>("#resetForm");
+  const submitBtn = qs<HTMLButtonElement>("#resetBtn");
+  const goSigninBtn = qs<HTMLButtonElement>("#goSigninAfterResetBtn");
 
-  const show = (t: string) => {
+  const show = (t: string, kind: "info" | "error" = "error") => {
     msg.hidden = false;
     msg.textContent = t;
+    msg.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
   };
+
+  let completed = false;
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (completed) return;
 
     const a = p1.value;
     const b = p2.value;
-    if (!a || !b) return show("パスワードを入力してください");
-    if (a !== b) return show("確認用パスワードが一致しません");
 
-    const { error } = await supabase.auth.updateUser({ password: a });
-    if (error) return show(error.message);
+    if (!a || !b) return show("新しいパスワードを入力してください。");
+    if (a !== b) return show("確認用パスワードが一致しません。");
 
-    show("更新しました。アカウント画面に戻ります。");
+    const passwordErrors = validatePassword(a);
+    if (passwordErrors.length > 0) {
+      return show(`パスワードの条件を満たしていません: ${passwordErrors.join("、")}`);
+    }
+
+    submitBtn.disabled = true;
+    p1.disabled = true;
+    p2.disabled = true;
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password: a });
+      if (error) throw error;
+
+      completed = true;
+      show(
+        "パスワードを更新しました。\nセキュリティのため、再度ログインしてください。",
+        "info"
+      );
+
+      goSigninBtn.hidden = false;
+    } catch (err: any) {
+      console.error(err);
+      submitBtn.disabled = false;
+      p1.disabled = false;
+      p2.disabled = false;
+      show(formatAuthErrorMessage(err));
+    }
+  });
+
+  goSigninBtn.addEventListener("click", async () => {
+    forceSignedOutScreen = "auth";
     authMode = "normal";
-    appScreen = "auth";
     await supabase.auth.signOut();
-    await rerender();
+
+    openAccountScreen(
+      "signin",
+      "パスワードが更新されました。新しいパスワードでログインしてください。",
+      "info"
+    );
   });
 }
 
@@ -2979,6 +4049,11 @@ async function rerender(message = "") {
     return;
   }
 
+  if (appScreen === "forgotPassword") {
+    mountForgotPasswordUI(app, message);
+    return;
+  }
+
   if (appScreen === "signup") {
     mountSignUpUI(app, message);
     return;
@@ -2986,6 +4061,16 @@ async function rerender(message = "") {
 
   if (appScreen === "signupOtp") {
     mountSignUpOtpUI(app, message);
+    return;
+  }
+
+  if (appScreen === "terms") {
+    mountTermsUI(app);
+    return;
+  }
+  
+  if (appScreen === "privacy") {
+    mountPrivacyUI(app);
     return;
   }
 
@@ -2999,17 +4084,13 @@ async function mount() {
       hasSession: !!session,
       userId: session?.user?.id ?? null,
     });
-
+  
     if (event === "PASSWORD_RECOVERY") {
       authMode = "recovery";
       rerender().catch(console.error);
       return;
     }
-    if (event === "SIGNED_OUT") {
-      authMode = "normal";
-      appScreen = "memo";
-    }
-
+  
     if (event === "SIGNED_IN") {
       authMode = "normal";
       if (suppressSignedInRerender) return;
@@ -3017,9 +4098,13 @@ async function mount() {
       rerender().catch(console.error);
       return;
     }
-
+  
     if (event === "SIGNED_OUT") {
+      authMode = "normal";
+      appScreen = forceSignedOutScreen ?? "memo";
+      forceSignedOutScreen = null;
       rerender().catch(console.error);
+      return;
     }
   });
 

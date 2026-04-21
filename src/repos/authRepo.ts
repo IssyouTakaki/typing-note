@@ -1,5 +1,24 @@
 import { supabase } from "../lib/supabaseClient";
 
+export type BeginSignUpResult =
+  | { status: "already_registered"; message: string }
+  | { status: "otp_sent"; message: string }
+  | { status: "error"; message: string; code?: string | null };
+
+export async function beginSignUp(draft: PendingSignUpDraft): Promise<BeginSignUpResult> {
+  const normalizedDraft = {
+    ...draft,
+    email: draft.email.trim().toLowerCase(),
+  };
+
+  const { data, error } = await supabase.functions.invoke("begin-signup", {
+    body: normalizedDraft,
+  });
+
+  if (error) throw error;
+  return data as BeginSignUpResult;
+}
+
 export type PendingSignUpDraft = {
   email: string;
   password: string;
