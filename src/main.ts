@@ -634,15 +634,9 @@ function getLeadingWhitespace(line: string): string {
 }
 
 function getOutdentCharCount(line: string): number {
-  const leading = getLeadingWhitespace(line);
-  if (!leading) return 0;
-
-  // 新方式: まず本物のタブ文字を 1 個単位で戻す
-  if (leading.startsWith(TAB_CHAR)) return 1;
-
-  // 旧データ互換: 既存メモに半角スペース indent がある場合は最大 4 個戻す
-  const spaces = leading.match(/^ {1,4}/)?.[0] ?? "";
-  return spaces.length;
+  // Shift+Tab は、本物のタブ文字によるインデントだけを 1 段階戻す。
+  // 行頭がタブ文字でなければ何もしない。
+  return line.startsWith(TAB_CHAR) ? TAB_CHAR.length : 0;
 }
 
 function isMarkdownListLine(line: string): boolean {
@@ -698,6 +692,8 @@ let togglePreviewWideHandler: (() => Promise<void>) | null = null;
 // let alignIndentShortcutHandler: (() => Promise<void>) | null = null;
 
 let renderTabsHandler: (() => void) | null = null;
+
+let openHeadingListPopupHandler: (() => Promise<void>) | null = null;
 
 // --- List focus / multi-select (Explorer & Dust) ---
 let explorerSelectToggleHandler: (() => Promise<void>) | null = null;
@@ -797,16 +793,16 @@ function isTogglePreviewWideShortcut(e: KeyboardEvent) {
   return e.altKey && e.shiftKey && hasMod;
 }
 
-// function isAlignIndentShortcut(e: KeyboardEvent) {
-//   const keyRow = e.key;
-//   const isTab = keyRow === "Tab" || e.code === "Tab";
-//   if (!isTab) return false;
+function isHeadingPopupShortcut(e: KeyboardEvent) {
+  const keyRow = e.key;
+  if (typeof keyRow !== "string") return false;
+  if (keyRow.toLowerCase() !== "i") return false;
 
-//   const isMac = navigator.platform.toLowerCase().includes("mac");
-//   const hasMod = isMac ? e.metaKey : e.ctrlKey;
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasMod = isMac ? e.metaKey : e.ctrlKey;
 
-//   return e.altKey && e.shiftKey && hasMod;
-// }
+  return e.altKey && e.shiftKey && hasMod;
+}
 
 function keyConfirm(message: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -1114,15 +1110,15 @@ function registerSaveShortcut() {
       return;
     }
 
-    // if (isAlignIndentShortcut(e)) {
-    //   e.preventDefault();
-    //   if (alignIndentShortcutHandler) void alignIndentShortcutHandler();
-    //   return;
-    // }
-
     if (isTogglePreviewWideShortcut(e)) {
       e.preventDefault();
       if (togglePreviewWideHandler) void togglePreviewWideHandler();
+      return;
+    }
+
+    if (isHeadingPopupShortcut(e)) {
+      e.preventDefault();
+      if (openHeadingListPopupHandler) void openHeadingListPopupHandler();
       return;
     }
     
@@ -1441,6 +1437,209 @@ function mountMemoUI(app: HTMLDivElement) {
     preview.scrollTop = Math.max(0, Math.min(maxScroll, maxScroll * ratio));
   };
   
+  type MemoHeadingEntry = {
+    level: number;
+    title: string;
+    position: number;
+  };
+
+  let teardownHeadingPopup: (() => void) | null = null;
+
+  const extractMemoHeadings = (text: string): MemoHeadingEntry[] => {
+    const entries: MemoHeadingEntry[] = [];
+    const re = /^(#{1,6})\s+(.+)$/gm;
+
+    for (const m of text.matchAll(re)) {
+      const hashes = m[1] ?? "";
+      const rawTitle = m[2] ?? "";
+      const title = rawTitle.trim();
+      if (!title) continue;
+
+      entries.push({
+        level: hashes.length,
+        title,
+        position: m.index ?? 0,
+      });
+    }
+
+    return entries;
+  };
+
+  const moveCaretToHeading = (entry: MemoHeadingEntry) => {
+    const value = input.value;
+    const pos = Math.max(0, Math.min(value.length, entry.position));
+
+    input.focus();
+    input.setSelectionRange(pos, pos);
+
+    const lineStart = getLineStartIndex(value, pos);
+    const lineNo = value.slice(0, lineStart).split(/\r?\n/).length - 1;
+    const lineHeight = Number.parseFloat(window.getComputedStyle(input).lineHeight) || 22;
+    const targetTop = Math.max(
+      0,
+      lineNo * lineHeight - input.clientHeight / 2 + lineHeight * 2
+    );
+
+    input.scrollTop = targetTop;
+    input.scrollLeft = 0;
+
+    syncPreviewToCaret();
+    saveActiveMemoViewport();
+  };
+
+  const closeHeadingPopup = (restoreEditorFocus = true) => {
+    if (!teardownHeadingPopup) return;
+    const teardown = teardownHeadingPopup;
+    teardownHeadingPopup = null;
+    teardown();
+
+    if (restoreEditorFocus) {
+      focusEditorInputIfVisible();
+    }
+  };
+
+  const openHeadingPopup = async () => {
+    if (state.view !== "editor" || activeTab().mode !== "editor") {
+      showMessage("Heading list popup is available only when a memo is open.");
+      return;
+    }
+
+    const headings = extractMemoHeadings(input.value);
+    if (headings.length === 0) {
+      showMessage("No headings found in this memo.");
+      return;
+    }
+
+    closeHeadingPopup(false);
+
+    const overlay = document.createElement("div");
+    overlay.className = "heading-popup-overlay";
+
+    const panel = document.createElement("div");
+    panel.className = "heading-popup";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-label", "Heading list popup");
+
+    const title = document.createElement("div");
+    title.className = "heading-popup-title";
+    title.textContent = "Headings";
+
+    const hint = document.createElement("div");
+    hint.className = "heading-popup-hint";
+    hint.textContent = "↑ ↓ to move · Enter to jump · Esc to close";
+
+    const list = document.createElement("div");
+    list.className = "heading-popup-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", "Headings");
+
+    panel.append(title, hint, list);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    let focusIndex = 0;
+
+    const renderHeadingPopup = () => {
+      list.innerHTML = headings
+        .map((h, idx) => {
+          const active = idx === focusIndex;
+          const indent = "&nbsp;".repeat((h.level - 1) * 4);
+          const label = `${"#".repeat(h.level)} ${escapeHtml(h.title)}`;
+
+          return `
+            <button
+              type="button"
+              class="heading-popup-item ${active ? "is-active" : ""}"
+              role="option"
+              aria-selected="${active ? "true" : "false"}"
+              data-idx="${idx}"
+            >
+              <span class="heading-popup-item-level">${indent}</span>
+              <span class="heading-popup-item-text">${label}</span>
+            </button>
+          `;
+        })
+        .join("");
+
+      const activeEl = list.querySelector<HTMLButtonElement>("button[data-idx].is-active");
+      activeEl?.scrollIntoView({ block: "nearest" });
+    };
+
+    const jumpToFocusedHeading = () => {
+      const entry = headings[focusIndex];
+      if (!entry) return;
+      closeHeadingPopup(false);
+      moveCaretToHeading(entry);
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeHeadingPopup(true);
+        return;
+      }
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopPropagation();
+        focusIndex = Math.min(headings.length - 1, focusIndex + 1);
+        renderHeadingPopup();
+        return;
+      }
+
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        focusIndex = Math.max(0, focusIndex - 1);
+        renderHeadingPopup();
+        return;
+      }
+
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        jumpToFocusedHeading();
+      }
+    };
+
+    const onOverlayClick = (e: MouseEvent) => {
+      if (e.target !== overlay) return;
+      closeHeadingPopup(true);
+    };
+
+    const onListClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      const btn = target?.closest<HTMLButtonElement>("button[data-idx]");
+      const idxStr = btn?.dataset.idx;
+      if (idxStr == null) return;
+
+      const idx = Number(idxStr);
+      if (!Number.isFinite(idx)) return;
+
+      focusIndex = Math.max(0, Math.min(headings.length - 1, idx));
+      renderHeadingPopup();
+      jumpToFocusedHeading();
+    };
+
+    overlay.addEventListener("click", onOverlayClick);
+    list.addEventListener("click", onListClick);
+    window.addEventListener("keydown", onKeyDown, true);
+
+    teardownHeadingPopup = () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      overlay.removeEventListener("click", onOverlayClick);
+      list.removeEventListener("click", onListClick);
+      overlay.remove();
+    };
+
+    renderHeadingPopup();
+  };
+
+
   const openMemoFromExplorer = async (id: string) => {
     const tab = activeTab();
     if (tab.mode !== "explorer") return;
@@ -1891,6 +2090,10 @@ function mountMemoUI(app: HTMLDivElement) {
     showMessage(isPreviewWide ? "Preview: Wide" : "Preview: Split");
   };
 
+  openHeadingListPopupHandler = async () => {
+    await openHeadingPopup();
+  };
+
   function setDirty(next: boolean) {
     activeTab().dirty = next;
 
@@ -2232,7 +2435,11 @@ const indentSelectedLines = (value: string, selectionStart: number, selectionEnd
   };
 };
 
-const outdentSelectedLines = (value: string, selectionStart: number, selectionEnd: number) => {
+const outdentSelectedLines = (
+  value: string,
+  selectionStart: number,
+  selectionEnd: number
+): { value: string; selectionStart: number; selectionEnd: number } | null => {
   const blockStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
   const blockEnd = value.indexOf("\n", selectionEnd);
   const safeBlockEnd = blockEnd === -1 ? value.length : blockEnd;
@@ -2255,7 +2462,13 @@ const outdentSelectedLines = (value: string, selectionStart: number, selectionEn
     return line.slice(removeCount);
   });
 
-  const nextValue = value.slice(0, blockStart) + outdentedLines.join("\n") + value.slice(safeBlockEnd);
+  // 行頭にタブ文字が一つもなければ、何もしない
+  if (removedTotal === 0) return null;
+
+  const nextValue =
+    value.slice(0, blockStart) +
+    outdentedLines.join("\n") +
+    value.slice(safeBlockEnd);
 
   return {
     value: nextValue,
@@ -2365,7 +2578,13 @@ input.addEventListener("keydown", (e) => {
   const value = input.value;
 
   if (selectionStart === selectionEnd) {
-    if (e.shiftKey) return;
+    if (e.shiftKey) {
+      const edit = outdentSelectedLines(value, selectionStart, selectionEnd);
+      if (!edit) return;
+
+      applyTextareaEdit(edit.value, edit.selectionStart, edit.selectionEnd);
+      return;
+    }
 
     const lineStart = getLineStartIndex(value, selectionStart);
     const lineEnd = getLineEndIndex(value, selectionStart);
@@ -2394,10 +2613,15 @@ input.addEventListener("keydown", (e) => {
     return;
   }
 
-  const edit = e.shiftKey
-    ? outdentSelectedLines(value, selectionStart, selectionEnd)
-    : indentSelectedLines(value, selectionStart, selectionEnd);
+  if (e.shiftKey) {
+    const edit = outdentSelectedLines(value, selectionStart, selectionEnd);
+    if (!edit) return;
 
+    applyTextareaEdit(edit.value, edit.selectionStart, edit.selectionEnd);
+    return;
+  }
+
+  const edit = indentSelectedLines(value, selectionStart, selectionEnd);
   applyTextareaEdit(edit.value, edit.selectionStart, edit.selectionEnd);
 });
 
@@ -3365,8 +3589,8 @@ function resetScreenHandlers() {
   closeTabHandler = null;
   switchTabHandler = null;
   togglePreviewWideHandler = null;
-  // alignIndentShortcutHandler = null;
   renderTabsHandler = null;
+  openHeadingListPopupHandler = null;
 
   teardownPanesResize?.();
   teardownPanesResize = null;
