@@ -191,35 +191,6 @@ function escapeHtml(input: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function renderInlineCodeOnly(input: string): string {
-  // `code` を <code> に変換し、それ以外は escape
-  // ※閉じ ` が無い場合は、残りを普通のテキストとして扱う
-  let out = "";
-  let i = 0;
-
-  while (i < input.length) {
-    const s = input.indexOf("`", i);
-    if (s === -1) {
-      out += escapeHtml(input.slice(i));
-      break;
-    }
-
-    out += escapeHtml(input.slice(i, s));
-
-    const e = input.indexOf("`", s + 1);
-    if (e === -1) {
-      out += escapeHtml(input.slice(s)); // unmatched `
-      break;
-    }
-
-    const code = input.slice(s + 1, e);
-    out += `<code class="md-code-inline">${escapeHtml(code)}</code>`;
-    i = e + 1;
-  }
-
-  return out;
-}
-
 function normalizeMarkdownHref(rawHref: string): string | null {
   const href = rawHref.trim();
   if (!href) return null;
@@ -479,31 +450,6 @@ function renderMarkdownTable(
     : "";
 
   return `<div class="md-table-wrap"><table class="md-table">${thead}${tbody}</table></div>`;
-}
-
-function renderPreviewPlainColumnsTable(rows: string[][]): string {
-  if (rows.length === 0) return "";
-
-  const maxCols = rows.reduce((max, row) => Math.max(max, row.length), 0);
-
-  const body = rows
-    .map((row) => {
-      const padded = Array.from({ length: maxCols }, (_, i) => row[i] ?? "");
-
-      return `
-        <tr class="md-cols-row">
-          ${padded
-            .map(
-              (cell) =>
-                `<td class="md-cols-cell">${cell ? renderInlineCode(cell) : ""}</td>`
-            )
-            .join("")}
-        </tr>
-      `;
-    })
-    .join("");
-
-  return `<table class="md-cols-table md-cols-table-plain"><tbody>${body}</tbody></table>`;
 }
 
 function renderPreviewTextBlock(text: string): string {
@@ -902,10 +848,6 @@ function getLineStartIndex(value: string, position: number) {
 function getLineEndIndex(value: string, position: number) {
   const end = value.indexOf("\n", position);
   return end === -1 ? value.length : end;
-}
-
-function getLeadingWhitespace(line: string): string {
-  return (line.match(/^[ \t]*/) ?? [""])[0];
 }
 
 function getOutdentCharCount(line: string): number {
@@ -4978,6 +4920,7 @@ function mountAuthUI(app: HTMLDivElement, message = "") {
         return;
       }
 
+      clearPasswordResetEmail();
       setMsg("");
       appScreen = "memo";
       await rerender();
