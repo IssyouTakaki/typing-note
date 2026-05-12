@@ -3,7 +3,7 @@
         <div class="auth-title">Email verification</div>
 
         <div id="signupOtpHelp" class="auth-help">
-            メールに届いた 8 桁の認証コードを半角文字で入力してください。
+            メールに記載された案内を確認してください。認証コードが記載されている場合は、下に入力してください。
         </div>
 
         <div id="signupOtpMsg" class="auth-msg" hidden></div>
@@ -11,7 +11,7 @@
         <label class="auth-label">Email</label>
         <input id="signupOtpEmail" class="auth-input" type="email" readonly />
 
-        <label class="auth-label">OTP code</label>
+        <label id="signupOtpCodeLabel" class="auth-label">OTP code</label>
         <input
             id="signupOtpCode"
             class="auth-input auth-otp-input"
@@ -20,8 +20,8 @@
             maxlength="8"
             autocomplete="one-time-code"
         />
-
-        <div class="auth-actions auth-actions-stack-mobile">
+        
+        <div id="signupOtpActions" class="auth-actions auth-actions-stack-mobile">
             <button id="signupOtpVerifyBtn" class="auth-btn auth-btn-primary" type="submit">
                 認証してアカウント作成
             </button>

@@ -1,9 +1,9 @@
 import { supabase } from "../lib/supabaseClient";
 
 export type BeginSignUpResult =
-  | { status: "already_registered"; message: string }
-  | { status: "otp_sent"; message: string }
-  | { status: "error"; message: string; code?: string | null };
+  | { status: "accepted"; message?: string }
+  | { status: "otp_sent"; message?: string }
+  | { status: "error"; message?: string; code?: string | null };
 
 export async function beginSignUp(draft: PendingSignUpDraft): Promise<BeginSignUpResult> {
   const normalizedDraft = {
@@ -43,20 +43,8 @@ function buildUserMetadata(draft: PendingSignUpDraft) {
   };
 }
 
-export async function requestSignUpOtp(draft: PendingSignUpDraft) {
-  const { data, error } = await supabase.auth.signInWithOtp({
-    email: draft.email,
-    options: {
-      shouldCreateUser: true,
-      data: buildUserMetadata(draft),
-    },
-  });
-  if (error) throw error;
-  return data;
-}
-
-export async function resendSignUpOtp(draft: PendingSignUpDraft) {
-  return requestSignUpOtp(draft);
+export async function resendSignUpOtp(draft: PendingSignUpDraft): Promise<BeginSignUpResult> {
+  return beginSignUp(draft);
 }
 
 export async function verifyEmailOtp(email: string, token: string) {

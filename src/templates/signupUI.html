@@ -3,7 +3,7 @@
         <div class="auth-title">TypingNote Sign up</div>
 
         <div class="auth-help">
-            アカウント情報を入力すると、未登録のメールアドレスにのみ認証コードを送信します。
+            アカウント情報を入力すると、次の画面でメール確認に進みます。
         </div>
 
         <div id="signupMsg" class="auth-msg" hidden></div>
@@ -53,7 +53,7 @@
 
         <div class="auth-actions auth-actions-stack-mobile">
             <button id="signupSubmitBtn" class="auth-btn auth-btn-primary" type="submit">
-                認証コードを送信
+                メール確認へ進む
             </button>
             <button id="signupBackBtn" class="auth-btn auth-btn-secondary" type="button">
                 Sign In に戻る
@@ -61,9 +61,5 @@
         </div>
 
         <button id="signupTopBtn" class="auth-btn auth-btn-link" type="button">TypingNote に戻る</button>
-
-        <!-- <div class="auth-note">
-            ※ Supabase の Confirm signup メールテンプレートで <code>{{ .Token }}</code> を使うと、8 桁 OTP を送信できます。
-        </div> -->
     </form>
 </div>

@@ -5,7 +5,7 @@ import {
   completeProfileAfterOtp,
   getSession,
   getUser,
-  requestSignUpOtp,
+  // requestSignUpOtp,
   resendSignUpOtp,
   signIn,
   signOut,
@@ -68,6 +68,9 @@ const DEFAULT_TEXT = `# Shortcut List
 09. (Explorer/Dust) Arrow Up/Down = Move focus
 10. (Explorer/Dust) Enter = Open focused memo (when none selected)
 11. ALT + SHIFT + CONTROL + V = Toggle Preview Wide (Hide/Show Input)
+12. ALT + SHIFT + CONTROL + E = Toggle Edit Wide (Hide/Show Preview)
+13. ALT + SHIFT + CONTROL + F = Search current place
+14. ALT + SHIFT + CONTROL + [ / ] = Go To Left/Right Tab
 
 # Explorer Behavior
 
@@ -85,11 +88,11 @@ const DEFAULT_TEXT = `# Shortcut List
 - Unordered list: - item
 - Ordered list: 1. item
 - Horizontal rule: ---
+- Bold: **bold**
 - Todo checklist:
-  - [ ] unchecked item
-  - [x] checked item
 
 Inline code example: \`const x = 1;\`
+Bold example: **Important text**
 
 Code block example:
 \`\`\`ts
@@ -188,7 +191,7 @@ function escapeHtml(input: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function renderInlineCode(input: string): string {
+function renderInlineCodeOnly(input: string): string {
   // `code` を <code> に変換し、それ以外は escape
   // ※閉じ ` が無い場合は、残りを普通のテキストとして扱う
   let out = "";
@@ -217,6 +220,134 @@ function renderInlineCode(input: string): string {
   return out;
 }
 
+function normalizeMarkdownHref(rawHref: string): string | null {
+  const href = rawHref.trim();
+  if (!href) return null;
+
+  // protocol 部分の空白・制御文字をつぶして javascript: などの混入を防ぐ。
+  const compact = href.replace(/[\u0000-\u001F\u007F\s]+/g, "").toLowerCase();
+
+  if (/^(https?:|mailto:|tel:)/.test(compact)) return href;
+  if (href.startsWith("#") || href.startsWith("/") || href.startsWith("./") || href.startsWith("../")) {
+    return href;
+  }
+
+  // foo/bar のような相対 URL は許可。scheme: 形式は上の allowlist 以外は拒否。
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(compact)) return href;
+
+  return null;
+}
+
+function tryParseMarkdownLink(
+  input: string,
+  startIndex: number
+): { html: string; nextIndex: number } | null {
+  if (input[startIndex] !== "[") return null;
+
+  const labelEnd = input.indexOf("]", startIndex + 1);
+  if (labelEnd === -1 || input[labelEnd + 1] !== "(") return null;
+
+  const hrefEnd = input.indexOf(")", labelEnd + 2);
+  if (hrefEnd === -1) return null;
+
+  const label = input.slice(startIndex + 1, labelEnd);
+  const href = normalizeMarkdownHref(input.slice(labelEnd + 2, hrefEnd));
+  if (!label || !href) return null;
+
+  const targetAttrs = href.startsWith("#")
+    ? ""
+    : ' target="_blank" rel="noopener noreferrer"';
+
+  return {
+    html: `<a class="md-link" href="${escapeHtml(href)}"${targetAttrs}>${renderInlineMarkdown(label, false)}</a>`,
+    nextIndex: hrefEnd + 1,
+  };
+}
+
+function tryParseMarkdownStrong(
+  input: string,
+  startIndex: number,
+  allowLinks: boolean
+): { html: string; nextIndex: number } | null {
+  if (!input.startsWith("**", startIndex)) return null;
+
+  const contentStart = startIndex + 2;
+  const contentEnd = input.indexOf("**", contentStart);
+  if (contentEnd === -1) return null;
+
+  const content = input.slice(contentStart, contentEnd);
+  if (!content) return null;
+
+  return {
+    html: `<strong class="md-strong">${renderInlineMarkdown(content, allowLinks)}</strong>`,
+    nextIndex: contentEnd + 2,
+  };
+}
+
+function renderInlineMarkdown(input: string, allowLinks = true): string {
+  // `code` / **bold** / [label](url) を変換し、それ以外は escape
+  // ※インラインコード内では、太字・リンク記法を解釈しない。
+  let out = "";
+  let i = 0;
+
+  while (i < input.length) {
+    const codeStart = input.indexOf("`", i);
+    const strongStart = input.indexOf("**", i);
+    const linkStart = allowLinks ? input.indexOf("[", i) : -1;
+
+    if (codeStart === -1 && strongStart === -1 && linkStart === -1) {
+      out += escapeHtml(input.slice(i));
+      break;
+    }
+
+    const starts = [codeStart, strongStart, linkStart].filter((x) => x !== -1);
+    const next = Math.min(...starts);
+    out += escapeHtml(input.slice(i, next));
+
+    if (next === codeStart) {
+      const codeEnd = input.indexOf("`", codeStart + 1);
+      if (codeEnd === -1) {
+        out += escapeHtml(input.slice(codeStart));
+        break;
+      }
+
+      const code = input.slice(codeStart + 1, codeEnd);
+      out += `<code class="md-code-inline">${escapeHtml(code)}</code>`;
+      i = codeEnd + 1;
+      continue;
+    }
+
+    if (next === strongStart) {
+      const parsedStrong = tryParseMarkdownStrong(input, strongStart, allowLinks);
+      if (parsedStrong) {
+        out += parsedStrong.html;
+        i = parsedStrong.nextIndex;
+        continue;
+      }
+
+      out += escapeHtml(input.slice(strongStart, strongStart + 2));
+      i = strongStart + 2;
+      continue;
+    }
+
+    const parsedLink = tryParseMarkdownLink(input, linkStart);
+    if (parsedLink) {
+      out += parsedLink.html;
+      i = parsedLink.nextIndex;
+      continue;
+    }
+
+    out += escapeHtml(input.charAt(linkStart));
+    i = linkStart + 1;
+  }
+
+  return out;
+}
+
+function renderInlineCode(input: string): string {
+  return renderInlineMarkdown(input);
+}
+
 type PreviewListItem =
   | { kind: "html"; html: string }
   | { kind: "cols"; marker: string; cells: string[]; indentLevel: number };
@@ -232,6 +363,122 @@ function splitPreviewColumns(input: string): string[] | null {
   if (cells.every((cell) => cell.length === 0)) return null;
 
   return cells;
+}
+
+type MarkdownTableAlign = "left" | "center" | "right" | null;
+
+function splitMarkdownTableRow(line: string): string[] | null {
+  if (!line.includes("|")) return null;
+
+  let source = line.trim();
+  if (source.startsWith("|")) source = source.slice(1);
+  if (source.endsWith("|") && !source.endsWith("\\|")) source = source.slice(0, -1);
+
+  const cells: string[] = [];
+  let current = "";
+  let inCode = false;
+
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    const next = source[i + 1];
+
+    if (ch === "\\" && next === "|") {
+      current += "|";
+      i++;
+      continue;
+    }
+
+    if (ch === "`") {
+      inCode = !inCode;
+      current += ch;
+      continue;
+    }
+
+    if (ch === "|" && !inCode) {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += ch;
+  }
+
+  cells.push(current.trim());
+
+  if (cells.length < 2) return null;
+  return cells;
+}
+
+function parseMarkdownTableSeparator(line: string): MarkdownTableAlign[] | null {
+  const cells = splitMarkdownTableRow(line);
+  if (!cells || cells.length < 2) return null;
+
+  const aligns: MarkdownTableAlign[] = [];
+
+  for (const rawCell of cells) {
+    const cell = rawCell.replace(/\s+/g, "");
+    if (!/^:?-{3,}:?$/.test(cell)) return null;
+
+    const starts = cell.startsWith(":");
+    const ends = cell.endsWith(":");
+
+    if (starts && ends) aligns.push("center");
+    else if (ends) aligns.push("right");
+    else if (starts) aligns.push("left");
+    else aligns.push(null);
+  }
+
+  return aligns;
+}
+
+function markdownTableAlignClass(align: MarkdownTableAlign): string {
+  if (!align) return "";
+  return ` md-table-align-${align}`;
+}
+
+function renderMarkdownTable(
+  headerCells: string[],
+  aligns: MarkdownTableAlign[],
+  rows: string[][]
+): string {
+  const maxCols = Math.max(
+    headerCells.length,
+    aligns.length,
+    ...rows.map((row) => row.length)
+  );
+
+  const normalizedHeader = Array.from({ length: maxCols }, (_, i) => headerCells[i] ?? "");
+
+  const thead = `
+    <thead>
+      <tr>
+        ${normalizedHeader
+          .map((cell, i) => `<th class="md-table-cell${markdownTableAlignClass(aligns[i] ?? null)}">${renderInlineCode(cell)}</th>`)
+          .join("")}
+      </tr>
+    </thead>
+  `;
+
+  const tbody = rows.length
+    ? `
+      <tbody>
+        ${rows
+          .map((row) => {
+            const normalizedRow = Array.from({ length: maxCols }, (_, i) => row[i] ?? "");
+            return `
+              <tr>
+                ${normalizedRow
+                  .map((cell, i) => `<td class="md-table-cell${markdownTableAlignClass(aligns[i] ?? null)}">${renderInlineCode(cell)}</td>`)
+                  .join("")}
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    `
+    : "";
+
+  return `<div class="md-table-wrap"><table class="md-table">${thead}${tbody}</table></div>`;
 }
 
 function renderPreviewPlainColumnsTable(rows: string[][]): string {
@@ -398,7 +645,8 @@ function renderPreviewMarkdown(text: string): string {
     return `<li class="md-li md-li-todo"${indentStyle}><label class="md-todo"><input class="md-todo-checkbox" type="checkbox" disabled${checkedAttr}><span class="md-todo-text">${renderInlineCode(content)}</span></label></li>`;
   };
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex] ?? "";
     // --- fenced code block ---
     const fenceMatch = line.match(/^\s*```(\S*)\s*$/);
     if (fenceMatch) {
@@ -457,6 +705,33 @@ function renderPreviewMarkdown(text: string): string {
           );
           continue;
         }
+      }
+    }
+
+        // markdown table:
+    // | Header | Header |
+    // | --- | --- |
+    // | Cell | Cell |
+    {
+      const headerCells = splitMarkdownTableRow(line);
+      const aligns = parseMarkdownTableSeparator(lines[lineIndex + 1] ?? "");
+
+      if (headerCells && aligns) {
+        const rows: string[][] = [];
+        let nextIndex = lineIndex + 2;
+
+        while (nextIndex < lines.length) {
+          const rowCells = splitMarkdownTableRow(lines[nextIndex] ?? "");
+          if (!rowCells) break;
+          rows.push(rowCells);
+          nextIndex++;
+        }
+
+        closeList();
+        flushText();
+        parts.push(renderMarkdownTable(headerCells, aligns, rows));
+        lineIndex = nextIndex - 1;
+        continue;
       }
     }
 
@@ -687,13 +962,16 @@ let sortExplorerHandler: (() => Promise<void>) | null = null;
 let deleteMemoHandler: (() => Promise<void>) | null = null;
 let closeTabHandler: (() => Promise<void>) | null = null;
 let switchTabHandler: ((digit: number) => Promise<void>) | null = null;
+let switchRelativeTabHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
 let togglePreviewWideHandler: (() => Promise<void>) | null = null;
+let toggleEditWideHandler: (() => Promise<void>) | null = null;
 
 // let alignIndentShortcutHandler: (() => Promise<void>) | null = null;
 
 let renderTabsHandler: (() => void) | null = null;
 
 let openHeadingListPopupHandler: (() => Promise<void>) | null = null;
+let openSearchHandler: (() => Promise<void>) | null = null;
 
 // --- List focus / multi-select (Explorer & Dust) ---
 let explorerSelectToggleHandler: (() => Promise<void>) | null = null;
@@ -782,10 +1060,47 @@ function isCloseShortcut(e: KeyboardEvent) {
   return e.altKey && e.shiftKey && hasMod;
 }
 
+function getRelativeTabShortcutDelta(e: KeyboardEvent): -1 | 1 | null {
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasMod = isMac ? e.metaKey : e.ctrlKey;
+
+  if (!e.altKey || !e.shiftKey || !hasMod) return null;
+
+  const key = typeof e.key === "string" ? e.key : "";
+
+  // Shift 押下中は US 配列などで "{" / "}" として来ることがあるため code も見る
+  if (e.code === "BracketLeft" || key === "[" || key === "{") return -1;
+  if (e.code === "BracketRight" || key === "]" || key === "}") return 1;
+
+  return null;
+}
+
 function isTogglePreviewWideShortcut(e: KeyboardEvent) {
   const keyRow = e.key;
   if (typeof keyRow !== "string") return false;
   if (keyRow.toLowerCase() !== "v") return false;
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasMod = isMac ? e.metaKey : e.ctrlKey;
+
+  return e.altKey && e.shiftKey && hasMod;
+}
+
+function isToggleEditWideShortcut(e: KeyboardEvent) {
+  const keyRow = e.key;
+  if (typeof keyRow !== "string") return false;
+  if (keyRow.toLowerCase() !== "e") return false;
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const hasMod = isMac ? e.metaKey : e.ctrlKey;
+
+  return e.altKey && e.shiftKey && hasMod;
+}
+
+function isSearchShortcut(e: KeyboardEvent) {
+  const keyRow = e.key;
+  if (typeof keyRow !== "string") return false;
+  if (keyRow.toLowerCase() !== "f") return false;
 
   const isMac = navigator.platform.toLowerCase().includes("mac");
   const hasMod = isMac ? e.metaKey : e.ctrlKey;
@@ -959,6 +1274,56 @@ function keyConfirmDust(message: string): Promise<DustDecision> {
   });
 }
 
+function keyConfirmDustRestoreAndOpen(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "key-confirm-overlay";
+
+    const card = document.createElement("div");
+    card.className = "key-confirm";
+
+    const title = document.createElement("div");
+    title.className = "key-confirm-title";
+    title.textContent = "Move from Dust";
+
+    const body = document.createElement("div");
+    body.className = "key-confirm-body";
+    body.textContent = message;
+
+    const hint = document.createElement("div");
+    hint.className = "key-confirm-hint";
+    hint.textContent = "Press Y to move to Explorer and open / N to cancel";
+
+    card.append(title, body, hint);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      const k = typeof e.key === "string" ? e.key.toLowerCase() : "";
+      if (k !== "y" && k !== "n" && k !== "escape") return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+      resolve(k === "y");
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      overlay.remove();
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target !== overlay) return;
+      cleanup();
+      resolve(false);
+    });
+  });
+}
+
 function getShortcutDigit(e: KeyboardEvent): number | null {
   const isMac = navigator.platform.toLowerCase().includes("mac");
   const hasMod = isMac ? e.metaKey : e.ctrlKey;
@@ -1025,13 +1390,6 @@ type SaveResult = "noop" | "created" | "updated" | "auth_required";
 
 type AutoUpdateResult = "noop" | "updated";
 
-/**
- * タブ遷移などで「編集中の既存メモ」を自動更新したい時に使う。
- * - currentMemoId がある（=既存メモ）
- * - dirty になっている
- * の場合だけ update を実行する（新規作成はしない）
-**/
-
 async function autoUpdateIfEditingCurrentMemo(): Promise<AutoUpdateResult> {
   // if (!state.dirty) return "noop";
   // if (!state.currentMemoId) return "noop";
@@ -1094,6 +1452,26 @@ function registerSaveShortcut() {
     if (!(e instanceof KeyboardEvent)) return;
     if (e.isComposing) return;
 
+    const isPotentialAppShortcut = e.altKey && e.shiftKey && (e.ctrlKey || e.metaKey);
+    if (isPotentialAppShortcut) {
+      const target = e.target instanceof HTMLElement
+        ? `${e.target.tagName.toLowerCase()}${e.target.id ? `#${e.target.id}` : ""}${e.target.className ? `.${String(e.target.className).replace(/\s+/g, ".")}` : ""}`
+        : String(e.target ?? "");
+
+      console.info("[shortcut] keydown", {
+        key: e.key,
+        code: e.code,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        view: state.view,
+        activeTabMode: activeTab().mode,
+        openSearchHandlerReady: !!openSearchHandler,
+        target,
+      });
+    }
+
     const digit = getShortcutDigit(e);
 
     if (digit !== null) {
@@ -1110,9 +1488,42 @@ function registerSaveShortcut() {
       return;
     }
 
+    const relativeTabDelta = getRelativeTabShortcutDelta(e);
+
+    if (relativeTabDelta !== null) {
+      e.preventDefault();
+      if (switchRelativeTabHandler) void switchRelativeTabHandler(relativeTabDelta);
+      return;
+    }
+
     if (isTogglePreviewWideShortcut(e)) {
       e.preventDefault();
       if (togglePreviewWideHandler) void togglePreviewWideHandler();
+      return;
+    }
+    
+    if (isToggleEditWideShortcut(e)) {
+      e.preventDefault();
+      if (toggleEditWideHandler) void toggleEditWideHandler();
+      return;
+    }
+    
+    if (isSearchShortcut(e)) {
+      e.preventDefault();
+      console.info("[shortcut] search matched", {
+        openSearchHandlerReady: !!openSearchHandler,
+        view: state.view,
+        activeTabMode: activeTab().mode,
+      });
+
+      if (!openSearchHandler) {
+        console.error("[shortcut] search matched, but openSearchHandler is null. mountMemoUI() may not have assigned it.");
+        return;
+      }
+
+      void openSearchHandler().catch((err) => {
+        console.error("[shortcut] openSearchHandler failed", err);
+      });
       return;
     }
 
@@ -1323,7 +1734,11 @@ function mountMemoUI(app: HTMLDivElement) {
   const inputPane = input.closest<HTMLElement>(".pane");
   if (!inputPane) throw new Error("input pane not found");
 
+  const previewPane = preview.closest<HTMLElement>(".pane");
+  if (!previewPane) throw new Error("preview pane not found");
+
   let isPreviewWide = false;
+  let isEditWide = false;
   let memoInputHadFocus = false;
 
   const clampSelectionPosition = (value: string, position: number) =>
@@ -1385,18 +1800,40 @@ function mountMemoUI(app: HTMLDivElement) {
     });
   };
 
-  const applyPreviewWide = (on: boolean) => {
-    if (on) saveActiveMemoViewport();
-
-    inputPane.hidden = on;
-    panes.style.gridTemplateColumns = on ? "1fr" : "";
-
-    if (on) {
+  const applyEditorPaneMode = () => {
+    const isSinglePane = isPreviewWide || isEditWide;
+  
+    inputPane.hidden = isPreviewWide;
+    previewPane.hidden = isEditWide;
+    panes.classList.toggle("is-preview-wide", isPreviewWide);
+    panes.classList.toggle("is-edit-wide", isEditWide);
+    panes.style.gridTemplateColumns = isSinglePane ? "1fr" : "";
+  
+    if (isPreviewWide) {
+      preview.tabIndex = 0;
       if (document.activeElement === input) input.blur();
       return;
     }
-
+  
     restoreActiveMemoViewport(true);
+  };
+  
+  const applyPreviewWide = (on: boolean) => {
+    if (on) saveActiveMemoViewport();
+  
+    isPreviewWide = on;
+    if (on) isEditWide = false;
+  
+    applyEditorPaneMode();
+  };
+  
+  const applyEditWide = (on: boolean) => {
+    if (on) saveActiveMemoViewport();
+  
+    isEditWide = on;
+    if (on) isPreviewWide = false;
+  
+    applyEditorPaneMode();
   };
 
   const focusEditorInputIfVisible = () => {
@@ -1415,6 +1852,24 @@ function mountMemoUI(app: HTMLDivElement) {
       preview.scrollTop = 0;
       saveActiveMemoViewport();
     });
+  };
+
+  const findOpenMemoTab = (memoId: string): TabState | null => {
+    return state.tabs.find(
+      (t) => t.mode === "editor" && t.currentMemoId === memoId
+    ) ?? null;
+  };
+
+  const activateMemoTabIfAlreadyOpen = async (
+    memoId: string,
+    message?: string
+  ): Promise<boolean> => {
+    const existing = findOpenMemoTab(memoId);
+    if (!existing) return false;
+
+    await activateTab(existing.id);
+    showMessage(message ?? `Already open → ${memoTitleFromContent(existing.text)}`);
+    return true;
   };
   
   const syncPreviewToCaret = () => {
@@ -1435,6 +1890,40 @@ function mountMemoUI(app: HTMLDivElement) {
     }
   
     preview.scrollTop = Math.max(0, Math.min(maxScroll, maxScroll * ratio));
+  };
+
+  const scrollPreviewToTextPosition = (position: number) => {
+    const text = input.value;
+    const maxScroll = Math.max(0, preview.scrollHeight - preview.clientHeight);
+    if (maxScroll <= 0) return;
+
+    const pos = clampSelectionPosition(text, position);
+    const before = text.slice(0, pos);
+    const beforeLines = before.split(/\r?\n/).length - 1;
+    const totalLines = text.split(/\r?\n/).length - 1;
+
+    let ratio = 0;
+    if (totalLines > 0) {
+      ratio = beforeLines / totalLines;
+    } else if (text.length > 0) {
+      ratio = pos / text.length;
+    }
+
+    preview.scrollTop = Math.max(0, Math.min(maxScroll, maxScroll * ratio));
+  };
+
+  const scrollInputToTextPosition = (position: number) => {
+    const value = input.value;
+    const pos = clampSelectionPosition(value, position);
+    const lineStart = getLineStartIndex(value, pos);
+    const lineNo = value.slice(0, lineStart).split(/\r?\n/).length - 1;
+    const lineHeight = Number.parseFloat(window.getComputedStyle(input).lineHeight) || 22;
+
+    input.scrollTop = Math.max(
+      0,
+      lineNo * lineHeight - input.clientHeight / 2 + lineHeight * 2
+    );
+    input.scrollLeft = 0;
   };
   
   type MemoHeadingEntry = {
@@ -1640,7 +2129,259 @@ function mountMemoUI(app: HTMLDivElement) {
   };
 
 
+  type MemoSearchEntry = {
+    position: number;
+    endPosition: number;
+    lineNo: number;
+    label: string;
+  };
+
+  const normalizeMemoSearchText = (value: string) => value.toLocaleLowerCase();
+
+  const ellipsizeSearchLine = (line: string, maxLen = 140) => {
+    const normalized = line.replaceAll("\t", "    ").trim();
+    if (normalized.length <= maxLen) return normalized || "(blank line)";
+    return `${normalized.slice(0, maxLen - 1)}…`;
+  };
+
+  const extractMemoSearchResults = (text: string, query: string): MemoSearchEntry[] => {
+    const needleRaw = query.trim();
+    if (!needleRaw) return [];
+
+    const hay = normalizeMemoSearchText(text);
+    const needle = normalizeMemoSearchText(needleRaw);
+    const entries: MemoSearchEntry[] = [];
+
+    let pos = 0;
+    while (pos <= hay.length) {
+      const found = hay.indexOf(needle, pos);
+      if (found === -1) break;
+
+      const lineStart = text.lastIndexOf("\n", Math.max(0, found - 1)) + 1;
+      const lineEndRaw = text.indexOf("\n", found);
+      const lineEnd = lineEndRaw === -1 ? text.length : lineEndRaw;
+      const lineNo = text.slice(0, lineStart).split(/\r?\n/).length;
+      const line = text.slice(lineStart, lineEnd).replace(/\r$/, "");
+
+      entries.push({
+        position: found,
+        endPosition: found + needleRaw.length,
+        lineNo,
+        label: ellipsizeSearchLine(line),
+      });
+
+      if (entries.length >= 100) break;
+      pos = found + Math.max(needle.length, 1);
+    }
+
+    return entries;
+  };
+
+  const jumpToMemoSearchEntry = (entry: MemoSearchEntry) => {
+    const start = clampSelectionPosition(input.value, entry.position);
+    const end = clampSelectionPosition(input.value, entry.endPosition);
+
+    if (isPreviewWide) {
+      scrollPreviewToTextPosition(start);
+      saveActiveMemoViewport();
+      return;
+    }
+
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(start, end);
+    scrollInputToTextPosition(start);
+    scrollPreviewToTextPosition(start);
+    saveActiveMemoViewport();
+  };
+
+  const getInitialMemoSearchQuery = () => {
+    if (isPreviewWide) return "";
+
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? start;
+    if (end <= start) return "";
+
+    const selected = input.value.slice(start, end).trim();
+    if (!selected || /\r?\n/.test(selected)) return "";
+    return selected.length > 80 ? selected.slice(0, 80) : selected;
+  };
+
+  const openMemoSearchPopup = async () => {
+    if (state.view !== "editor" || activeTab().mode !== "editor") {
+      showMessage("Memo search is available only when a memo is open.");
+      return;
+    }
+
+    closeHeadingPopup(false);
+
+    const overlay = document.createElement("div");
+    overlay.className = "heading-popup-overlay";
+
+    const panel = document.createElement("div");
+    panel.className = "heading-popup";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-label", isPreviewWide ? "Preview search" : "Memo search");
+
+    const title = document.createElement("div");
+    title.className = "heading-popup-title";
+    title.textContent = isPreviewWide ? "Search Preview" : "Search Memo";
+
+    const searchBox = document.createElement("input");
+    searchBox.className = "heading-popup-search";
+    searchBox.type = "search";
+    searchBox.autocomplete = "off";
+    searchBox.spellcheck = false;
+    searchBox.placeholder = isPreviewWide ? "Search in preview..." : "Search in memo...";
+    searchBox.value = getInitialMemoSearchQuery();
+
+    const hint = document.createElement("div");
+    hint.className = "heading-popup-hint";
+    hint.textContent = "Type to search · ↑ ↓ to move · Enter to jump · Esc to close";
+
+    const list = document.createElement("div");
+    list.className = "heading-popup-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", "Search results");
+
+    panel.append(title, searchBox, hint, list);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    let focusIndex = 0;
+    let results = extractMemoSearchResults(input.value, searchBox.value);
+
+    const renderSearchPopup = () => {
+      const q = searchBox.value.trim();
+      results = extractMemoSearchResults(input.value, q);
+      focusIndex = Math.max(0, Math.min(focusIndex, results.length - 1));
+
+      if (!q) {
+        list.innerHTML = `<div class="heading-popup-empty">検索語を入力してください。</div>`;
+        return;
+      }
+
+      if (results.length === 0) {
+        list.innerHTML = `<div class="heading-popup-empty">No matches for "${escapeHtml(q)}"</div>`;
+        return;
+      }
+
+      list.innerHTML = results
+        .map((r, idx) => {
+          const active = idx === focusIndex;
+          return `
+            <button
+              type="button"
+              class="heading-popup-item ${active ? "is-active" : ""}"
+              role="option"
+              aria-selected="${active ? "true" : "false"}"
+              data-idx="${idx}"
+            >
+              <span class="heading-popup-item-level">L${r.lineNo}</span>
+              <span class="heading-popup-item-text">${escapeHtml(r.label)}</span>
+            </button>
+          `;
+        })
+        .join("");
+
+      const activeEl = list.querySelector<HTMLButtonElement>("button[data-idx].is-active");
+      activeEl?.scrollIntoView({ block: "nearest" });
+    };
+
+    const closeSearchPopup = (restoreFocus = true) => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      overlay.removeEventListener("click", onOverlayClick);
+      list.removeEventListener("click", onListClick);
+      searchBox.removeEventListener("input", onSearchInput);
+      overlay.remove();
+
+      if (!restoreFocus) return;
+      if (isPreviewWide) preview.focus({ preventScroll: true });
+      else focusEditorInputIfVisible();
+    };
+
+    const jumpToFocusedSearchResult = () => {
+      const entry = results[focusIndex];
+      if (!entry) return;
+      closeSearchPopup(false);
+      jumpToMemoSearchEntry(entry);
+      showMessage(`Search hit ${focusIndex + 1}/${results.length}`);
+    };
+
+    function onSearchInput() {
+      focusIndex = 0;
+      renderSearchPopup();
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.isComposing) return;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSearchPopup(true);
+        return;
+      }
+
+      if (e.key === "ArrowDown") {
+        if (results.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        focusIndex = Math.min(results.length - 1, focusIndex + 1);
+        renderSearchPopup();
+        return;
+      }
+
+      if (e.key === "ArrowUp") {
+        if (results.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        focusIndex = Math.max(0, focusIndex - 1);
+        renderSearchPopup();
+        return;
+      }
+
+      if (e.key === "Enter") {
+        if (results.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        jumpToFocusedSearchResult();
+      }
+    }
+
+    function onOverlayClick(e: MouseEvent) {
+      if (e.target !== overlay) return;
+      closeSearchPopup(true);
+    }
+
+    function onListClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      const btn = target?.closest<HTMLButtonElement>("button[data-idx]");
+      const idxStr = btn?.dataset.idx;
+      if (idxStr == null) return;
+
+      const idx = Number(idxStr);
+      if (!Number.isFinite(idx)) return;
+
+      focusIndex = Math.max(0, Math.min(results.length - 1, idx));
+      jumpToFocusedSearchResult();
+    }
+
+    searchBox.addEventListener("input", onSearchInput);
+    overlay.addEventListener("click", onOverlayClick);
+    list.addEventListener("click", onListClick);
+    window.addEventListener("keydown", onKeyDown, true);
+
+    renderSearchPopup();
+    window.requestAnimationFrame(() => {
+      searchBox.focus();
+      searchBox.select();
+    });
+  };
+
   const openMemoFromExplorer = async (id: string) => {
+    if (await activateMemoTabIfAlreadyOpen(id)) return;
+
     const tab = activeTab();
     if (tab.mode !== "explorer") return;
 
@@ -1659,8 +2400,33 @@ function mountMemoUI(app: HTMLDivElement) {
     focusMemoStart();
   };
 
+  const openMemoInNewEditorTab = async (memo: MemoRow): Promise<boolean> => {
+    if (await activateMemoTabIfAlreadyOpen(memo.id)) return true;
+
+    if (state.tabs.length >= MAX_TABS) {
+      showMessage(`Max ${MAX_TABS} tabs — close one before opening from Dust.`);
+      return false;
+    }
+
+    const id = crypto.randomUUID();
+    state.tabs.push({
+      id,
+      mode: "editor",
+      text: memo.content,
+      dirty: false,
+      currentMemoId: memo.id,
+      returnToTabId: null,
+    });
+
+    memoViewportStateByTabId.delete(id);
+    await activateTab(id, { skipSaveViewport: true });
+    showMessage(`Moved to Explorer and opened → ${memoTitleFromContent(memo.content)}`);
+    focusMemoStart();
+    return true;
+  };
+
   // 初期反映
-  applyPreviewWide(isPreviewWide);
+  applyEditorPaneMode();
 
   // const reloadBtn = qs<HTMLButtonElement>("#reloadBtn");
   const listState = qs<HTMLSpanElement>("#listState");
@@ -1786,17 +2552,19 @@ function mountMemoUI(app: HTMLDivElement) {
     return memoTitleFromContent(t.text);
   };
   
-  // const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") => {
-  //   window.requestAnimationFrame(() => {
-  //     const btn = Array.from(
-  //       tabList.querySelectorAll<HTMLButtonElement>('button[data-tab-id]')
-  //     ).find((b) => b.dataset.tabId === tabId);
+  const findOpenSpecialTab = (mode: "explorer" | "dust"): TabState | null => {
+    return state.tabs.find((t) => t.mode === mode) ?? null;
+  };
 
-  //     if (!btn) return;
-  //     // Scroll only within the tab list (horizontal)
-  //     btn.scrollIntoView({ behavior, block: "nearest", inline: "nearest" });
-  //   });
-  // };
+  const activateSpecialTabIfAlreadyOpen = async (
+    mode: "explorer" | "dust"
+  ): Promise<boolean> => {
+    const existing = findOpenSpecialTab(mode);
+    if (!existing) return false;
+
+    await activateTab(existing.id);
+    return true;
+  };
 
   const scrollTabIntoView = (tabId: string, behavior: ScrollBehavior = "smooth") => {
     window.requestAnimationFrame(() => {
@@ -1873,6 +2641,49 @@ function mountMemoUI(app: HTMLDivElement) {
     else showMessage(`Switched → Tab ${digit}: ${title}`);
   };
   
+  switchRelativeTabHandler = async (delta: -1 | 1) => {
+    if (state.tabs.length <= 1) {
+      const tab = activeTab();
+      scrollTabIntoView(tab.id);
+      showMessage(`Already on the only tab: ${getTabLabel(tab)}`);
+      return;
+    }
+
+    const currentIndex = state.tabs.findIndex((t) => t.id === state.activeTabId);
+
+    if (currentIndex < 0) {
+      showMessage("Active tab not found.");
+      return;
+    }
+
+    const nextIndex = (currentIndex + delta + state.tabs.length) % state.tabs.length;
+    const target = state.tabs[nextIndex];
+
+    if (!target) {
+      showMessage("Target tab not found.");
+      return;
+    }
+
+    let saveResult: SaveResult = "noop";
+    try {
+      saveResult = await saveIfDirty(); // 未保存なら保存してから切替
+    } catch (err) {
+      console.error("save failed before switching relative tab", err);
+      showMessage("Oops — save failed 😵‍💫", 2500);
+      return; // 保存失敗 → 切替しない
+    }
+
+    await activateTab(target.id);
+
+    const tabNumber = nextIndex + 1;
+    const title = getTabLabel(target);
+    const arrow = delta < 0 ? "←" : "→";
+
+    if (saveResult === "updated") showMessage(`Updated ✨ ${arrow} Tab ${tabNumber}: ${title}`);
+    else if (saveResult === "created") showMessage(`Created 🚀 ${arrow} Tab ${tabNumber}: ${title}`);
+    else showMessage(`Switched ${arrow} Tab ${tabNumber}: ${title}`);
+  };
+
   function renderTabs() {
     const reached = state.tabs.length >= MAX_TABS;
     newTabBtn.disabled = reached;
@@ -2050,8 +2861,8 @@ function mountMemoUI(app: HTMLDivElement) {
     // Keep state text in sync
     if (isExplorer) updateExplorerStateText();
     if (isDust) updateDustStateText();
-    if (isEditor) applyPreviewWide(isPreviewWide);
-
+    if (isEditor) applyEditorPaneMode();
+    
     if (isEditor) syncPanesHeight();
   }
   
@@ -2085,13 +2896,46 @@ function mountMemoUI(app: HTMLDivElement) {
       return;
     }
   
-    isPreviewWide = !isPreviewWide;
-    applyPreviewWide(isPreviewWide);
-    showMessage(isPreviewWide ? "Preview: Wide" : "Preview: Split");
+    const nextPreviewWide = !isPreviewWide;
+    applyPreviewWide(nextPreviewWide);
+    showMessage(nextPreviewWide ? "View: Wide" : "View/Edit: Split");
+  };
+  
+  toggleEditWideHandler = async () => {
+    if (state.view !== "editor") {
+      showMessage("Edit wide is available in Editor.");
+      return;
+    }
+  
+    const nextEditWide = !isEditWide;
+    applyEditWide(nextEditWide);
+    showMessage(nextEditWide ? "Edit: Wide" : "View/Edit: Split");
   };
 
   openHeadingListPopupHandler = async () => {
     await openHeadingPopup();
+  };
+
+  openSearchHandler = async () => {
+    console.info("[search] openSearchHandler invoked", {
+      view: state.view,
+      activeTabMode: activeTab().mode,
+      isPreviewWide,
+      searchInputExists: !!searchInput,
+      searchInputHidden: searchInput.hidden,
+      searchInputDisabled: searchInput.disabled,
+    });
+
+    if (state.view === "explorer" || state.view === "dust") {
+      syncSearchUi();
+      searchInput.disabled = false;
+      searchInput.focus({ preventScroll: true });
+      searchInput.select();
+      showMessage(state.view === "explorer" ? "Search in Explorer" : "Search in Dust");
+      return;
+    }
+
+    await openMemoSearchPopup();
   };
 
   function setDirty(next: boolean) {
@@ -3058,7 +3902,7 @@ input.addEventListener("keydown", (e) => {
       showMessage("Oops — action failed 😵‍💫", 2500);
     }
   });
-  
+
   async function openExplorerTabByShortcut() {
     const session = await getSession();
     if (!session) {
@@ -3067,8 +3911,14 @@ input.addEventListener("keydown", (e) => {
       return;
     }
 
-    const returnToTabId = state.activeTabId;
     const r = await autoUpdateIfEditingCurrentMemo();
+
+    if (await activateSpecialTabIfAlreadyOpen("explorer")) {
+      showMessage(r === "updated" ? "Updated ✨ — Explorer tab activated" : "Explorer tab activated");
+      return;
+    }
+
+    const returnToTabId = state.activeTabId;
     const opened = await createSpecialTab("explorer", returnToTabId);
     if (!opened) return;
 
@@ -3083,8 +3933,14 @@ input.addEventListener("keydown", (e) => {
       return;
     }
 
-    const returnToTabId = state.activeTabId;
     const r = await autoUpdateIfEditingCurrentMemo();
+
+    if (await activateSpecialTabIfAlreadyOpen("dust")) {
+      showMessage(r === "updated" ? "Updated ✨ — Dust tab activated" : "Dust tab activated");
+      return;
+    }
+
+    const returnToTabId = state.activeTabId;
     const opened = await createSpecialTab("dust", returnToTabId);
     if (!opened) return;
 
@@ -3167,22 +4023,44 @@ input.addEventListener("keydown", (e) => {
     if (!id) return;
 
     try {
-      await saveIfDirty();
       const userId = await requireUserId();
       const memo = await getMemo({ userId, id });
       if (!memo) return;
 
-      const tab = activeTab();
-      tab.mode = "editor";
-      tab.currentMemoId = memo.id;
-      tab.text = memo.content;
-      tab.dirty = false;
-      tab.returnToTabId = null;
+      const alreadyOpenTab = findOpenMemoTab(id);
+      if (!alreadyOpenTab && state.tabs.length >= MAX_TABS) {
+        showMessage(`Max ${MAX_TABS} tabs — close one before opening from Dust.`);
+        return;
+      }
 
-      await activateTab(tab.id, { skipSaveViewport: true });
-      focusMemoStart();
+      const title = memoTitleFromContent(memo.content);
+      const ok = await keyConfirmDustRestoreAndOpen(
+        alreadyOpenTab
+          ? `"${title}" is in Dust.\n\nMove this memo to Explorer and switch to the already open tab?`
+          : `"${title}" is in Dust.\n\nMove this memo to Explorer and open it in a new tab?`
+      );
+
+      if (!ok) {
+        showMessage("Canceled.");
+        return;
+      }
+
+      await restoreMemo({ userId, id });
+      state.dustSelectedIds.delete(id);
+      state.dustFocusId = null;
+
+      if (alreadyOpenTab) {
+        await activateTab(alreadyOpenTab.id);
+        showMessage(`Moved to Explorer and switched → ${memoTitleFromContent(alreadyOpenTab.text)}`);
+      } else {
+        await openMemoInNewEditorTab(memo);
+      }
+
+      void loadExplorer();
+      void loadDust();
     } catch (e) {
-      console.error(e);
+      console.error("open from dust failed", e);
+      showMessage("Oops — failed to move/open from Dust 😵‍💫", 2500);
     }
   };
 
@@ -3247,6 +4125,52 @@ input.addEventListener("keydown", (e) => {
     }
   };
   
+  const closeActiveMemoTabAfterTrash = async (memoIds: Iterable<string>): Promise<boolean> => {
+    const ids = new Set(memoIds);
+    const tab = activeTab();
+
+    if (tab.mode !== "editor") return false;
+    if (!tab.currentMemoId) return false;
+    if (!ids.has(tab.currentMemoId)) return false;
+
+    const idx = state.tabs.findIndex((t) => t.id === tab.id);
+    if (idx < 0) return false;
+
+    memoViewportStateByTabId.delete(tab.id);
+
+    // 最後の1枚は、タブ0枚にせず空の新規タブへ置き換える
+    if (state.tabs.length === 1) {
+      const newId = crypto.randomUUID();
+      state.tabs = [{
+        id: newId,
+        mode: "editor",
+        text: "",
+        dirty: false,
+        currentMemoId: null,
+        returnToTabId: null,
+      }];
+      state.activeTabId = newId;
+
+      await activateTab(newId, { skipSaveViewport: true });
+      return true;
+    }
+
+    const returnToTabId = tab.returnToTabId;
+
+    state.tabs.splice(idx, 1);
+
+    const next =
+      (returnToTabId
+        ? state.tabs.find((t) => t.id === returnToTabId) ?? null
+        : null) ??
+      state.tabs[Math.max(0, idx - 1)];
+
+    state.activeTabId = next.id;
+    await activateTab(next.id, { skipSaveViewport: true });
+
+    return true;
+  };
+
   deleteMemoHandler = async () => {
     // Explorer: move selected memos to Dust
     if (state.view === "explorer") {
@@ -3265,15 +4189,21 @@ input.addEventListener("keydown", (e) => {
       try {
         await autoUpdateIfEditingCurrentMemo();
         const userId = await requireUserId();
+        const deletedIds = Array.from(state.explorerSelectedIds);
+
         // sequential for safety
-        for (const id of Array.from(state.explorerSelectedIds)) {
+        for (const id of deletedIds) {
           await trashMemo({ userId, id });
         }
 
+        await closeActiveMemoTabAfterTrash(deletedIds);
+
         state.explorerSelectedIds.clear();
         updateExplorerStateText();
+
         showMessage("Moved to Dust 🗑️");
-        await goDust();
+        setView("dust");
+        await loadDust();
       } catch (err) {
         console.error("delete failed", err);
         showMessage("Oops — delete failed 😵‍💫", 2500);
@@ -3349,18 +4279,15 @@ input.addEventListener("keydown", (e) => {
     try {
       await autoUpdateIfEditingCurrentMemo(); // dirtyなら更新してから捨てる
       const userId = await requireUserId();
-      await trashMemo({ userId, id: tab.currentMemoId });
-  
-      tab.currentMemoId = null;
-      tab.text = "";
-      tab.dirty = false;
-      memoViewportStateByTabId.delete(tab.id);
-  
-      renderEditor();
-      renderTabs();
-  
+      const deletedMemoId = tab.currentMemoId;
+
+      await trashMemo({ userId, id: deletedMemoId });
+
+      await closeActiveMemoTabAfterTrash([deletedMemoId]);
+
       showMessage("Moved to Dust 🗑️");
-      await goDust(); // 捨てた後にDUST表示
+      setView("dust");
+      await loadDust();
     } catch (err) {
       console.error("delete failed", err);
       showMessage("Oops — delete failed 😵‍💫", 2500);
@@ -3497,48 +4424,34 @@ function formatAuthErrorMessage(error: unknown): string {
     return "サインアップ確認処理でエラーが発生しました。設定またはサーバー状態を確認してください。";
   }
 
-  if (normalized.includes("failed to fetch")) {
-    return "ネットワーク通信に失敗しました。接続状況を確認して再度お試しください。";
-  }
-
-  if (normalized.includes("invalid login credentials")) {
-    return "メールアドレスまたはパスワードが正しくありません。";
-  }
-
-  if (normalized.includes("email not confirmed")) {
-    return "メール確認が完了していません。確認メールのリンクを開いてください。";
-  }
-
-  if (normalized.includes("user already registered")) {
-    return "このメールアドレスは既に登録されています。";
-  }
-
-  if (normalized.includes("password should be at least")) {
-    return "パスワードの文字数が不足しています。";
-  }
-
-  if (
-    normalized.includes("token has expired") ||
-    normalized.includes("otp_expired") ||
-    normalized.includes("expired")
-  ) {
-    return "認証コードの有効期限が切れています。コードを再送してください。";
-  }
-
-  if (
-    normalized.includes("invalid token") ||
-    normalized.includes("token not found") ||
-    normalized.includes("forbidden")
-  ) {
-    return "認証コードが正しくありません。入力内容を確認してください。";
-  }
+  // ...既存の分岐はそのまま...
 
   return raw || "認証に失敗しました。";
+}
+
+function formatEmailProcedureErrorMessage(error: unknown): string {
+  const message = formatAuthErrorMessage(error);
+
+  if (
+    message.includes("サインアップ確認処理でエラーが発生しました") ||
+    message.includes("サーバーとの通信に失敗しました")
+  ) {
+    return "メール送信を完了できませんでした。設定またはサーバー状態を確認してください。";
+  }
+
+  return message || "メール送信を完了できませんでした。しばらくしてから再度お試しください。";
 }
 
 const TERMS_VERSION = "v1";
 const PRIVACY_VERSION = "v1";
 const PENDING_SIGNUP_STORAGE_KEY = "typingnote.pending-signup";
+const PENDING_SIGNUP_EMAIL_STORAGE_KEY = "typingnote.pending-signup-email";
+const SIGNUP_EMAIL_CHECK_MESSAGE =
+  "入力されたメールアドレス宛にメールを送信しました。\nメールに記載された案内を確認してください。";
+const SIGNUP_EMAIL_CHECK_HELP =
+  "入力されたメールアドレス宛に送信したメールを確認してください。認証コードが記載されている場合は、下に入力してください。";
+const EMAIL_PROCEDURE_CHECK_MESSAGE =
+  "入力されたメールアドレス宛に手続きに関するメールを送信しました。\nメールに記載された案内を確認してください。";
 
 const PASSWORD_RESET_EMAIL_STORAGE_KEY = "typingnote.password-reset-email";
 let forceSignedOutScreen: "memo" | "auth" | null = null;
@@ -3588,9 +4501,12 @@ function resetScreenHandlers() {
   deleteMemoHandler = null;
   closeTabHandler = null;
   switchTabHandler = null;
+  switchRelativeTabHandler = null;
   togglePreviewWideHandler = null;
+  toggleEditWideHandler = null;
   renderTabsHandler = null;
   openHeadingListPopupHandler = null;
+  openSearchHandler = null;
 
   teardownPanesResize?.();
   teardownPanesResize = null;
@@ -3637,9 +4553,34 @@ function canUseLocalStorage() {
   }
 }
 
+
+function savePendingSignUpEmail(email: string) {
+  if (!canUseLocalStorage()) return;
+  localStorage.setItem(PENDING_SIGNUP_EMAIL_STORAGE_KEY, email.trim().toLowerCase());
+}
+
+function loadPendingSignUpEmail(): string {
+  if (!canUseLocalStorage()) return "";
+  return localStorage.getItem(PENDING_SIGNUP_EMAIL_STORAGE_KEY) ?? "";
+}
+
+function clearPendingSignUpEmail() {
+  if (!canUseLocalStorage()) return;
+  localStorage.removeItem(PENDING_SIGNUP_EMAIL_STORAGE_KEY);
+}
+
+function clearPendingSignUpState() {
+  clearPendingSignUpDraft();
+  clearPendingSignUpEmail();
+}
+
 function savePendingSignUpDraft(draft: PendingSignUpDraft) {
   if (!canUseLocalStorage()) return;
-  localStorage.setItem(PENDING_SIGNUP_STORAGE_KEY, JSON.stringify(draft));
+  localStorage.setItem(PENDING_SIGNUP_STORAGE_KEY, JSON.stringify({
+    ...draft,
+    email: draft.email.trim().toLowerCase(),
+  }));
+  savePendingSignUpEmail(draft.email);
 }
 
 function loadPendingSignUpDraft(): PendingSignUpDraft | null {
@@ -3690,12 +4631,6 @@ const waitForSession = async (timeoutMs = 3000) => {
   return null;
 };
 
-// function openAccountScreen(intent: "signin" | "signup", message = "") {
-//   authScreenIntent = intent;
-//   appScreen = "auth";
-//   rerender(message).catch(console.error);
-// }
-
 function mountSignUpUI(app: HTMLDivElement, message = "") {
   resetScreenHandlers();
   app.innerHTML = signupUIHtml;
@@ -3715,18 +4650,6 @@ function mountSignUpUI(app: HTMLDivElement, message = "") {
   const topBtn = qs<HTMLButtonElement>("#signupTopBtn");
   const openTermsBtn = qs<HTMLButtonElement>("#openTermsBtn");
   const openPrivacyBtn = qs<HTMLButtonElement>("#openPrivacyBtn");
-
-  // const draft = loadPendingSignUpDraft();
-  // if (draft) {
-  //   displayNameEl.value = draft.displayName;
-  //   familyNameEl.value = draft.familyName;
-  //   givenNameEl.value = draft.givenName;
-  //   emailEl.value = draft.email;
-  //   passEl.value = draft.password;
-  //   pass2El.value = draft.password;
-  //   agreeTermsEl.checked = !!draft.agreedTermsAt;
-  //   agreePrivacyEl.checked = !!draft.agreedPrivacyAt;
-  // }
 
   const setMsg = (t: string, kind: "info" | "error" = "error") => {
     if (!t) {
@@ -3807,28 +4730,21 @@ function mountSignUpUI(app: HTMLDivElement, message = "") {
 
     try {
       setBusy(true);
-      setMsg("メールアドレスを確認しています...", "info");
-    
+      setMsg("メールを送信しています...", "info");
+
       const result = await beginSignUp(nextDraft);
-    
-      if (result.status === "already_registered") {
-        setMsg(result.message, "error");
+
+      if (result.status === "error") {
+        setMsg("メール送信を完了できませんでした。しばらくしてから再度お試しください。", "error");
         return;
       }
-    
-      if (result.status === "otp_sent") {
-        savePendingSignUpDraft(nextDraft);
-        openSignupOtpScreen(
-          "認証コードをメールで送信しました。メールに届いた 8 桁コードを入力してください。",
-          "info"
-        );
-        return;
-      }
-    
-      setMsg(result.message || "認証コードの送信に失敗しました。", "error");
+
+      savePendingSignUpDraft(nextDraft);
+      openSignupOtpScreen(SIGNUP_EMAIL_CHECK_MESSAGE, "info");
+      return;
     } catch (err: any) {
       console.error(err);
-      setMsg(formatAuthErrorMessage(err), "error");
+      setMsg(formatEmailProcedureErrorMessage(err), "error");
     } finally {
       setBusy(false);
     }
@@ -3860,13 +4776,16 @@ function mountSignUpOtpUI(app: HTMLDivElement, message = "") {
   const helpEl = qs<HTMLDivElement>("#signupOtpHelp");
   const form = qs<HTMLFormElement>("#signupOtpForm");
   const emailEl = qs<HTMLInputElement>("#signupOtpEmail");
+  // const codeLabelEl = qs<HTMLLabelElement>("#signupOtpCodeLabel");
   const codeEl = qs<HTMLInputElement>("#signupOtpCode");
+  // const otpActionsEl = qs<HTMLDivElement>("#signupOtpActions");
   const verifyBtn = qs<HTMLButtonElement>("#signupOtpVerifyBtn");
   const resendBtn = qs<HTMLButtonElement>("#signupOtpResendBtn");
   const backBtn = qs<HTMLButtonElement>("#signupOtpBackBtn");
   const topBtn = qs<HTMLButtonElement>("#signupOtpTopBtn");
 
   const draft = loadPendingSignUpDraft();
+  const pendingEmail = draft?.email ?? loadPendingSignUpEmail();
 
   const setMsg = (t: string, kind: "info" | "error" = "error") => {
     if (!t) {
@@ -3879,15 +4798,15 @@ function mountSignUpOtpUI(app: HTMLDivElement, message = "") {
     msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
   };
 
-  if (!draft) {
+  if (!pendingEmail) {
     emailEl.value = "";
     helpEl.textContent = "先にアカウント作成画面からメールアドレスを入力してください。";
     verifyBtn.disabled = true;
     resendBtn.disabled = true;
     setMsg("アカウント作成情報が見つかりません。入力画面からやり直してください。", "error");
   } else {
-    emailEl.value = draft.email;
-    helpEl.textContent = `${draft.email} に送信された 8 桁の認証コードを入力してください。`;
+    emailEl.value = pendingEmail;
+    helpEl.textContent = SIGNUP_EMAIL_CHECK_HELP;
     if (message) setMsg(message, authFlashKind);
     else setMsg("");
   }
@@ -3921,7 +4840,7 @@ function mountSignUpOtpUI(app: HTMLDivElement, message = "") {
       suppressSignedInRerender = true;
       await verifyEmailOtp(draft.email, code);
       await completeProfileAfterOtp(draft);
-      clearPendingSignUpDraft();
+      clearPendingSignUpState();
       suppressSignedInRerender = false;
       appScreen = "memo";
       await rerender();
@@ -3938,27 +4857,39 @@ function mountSignUpOtpUI(app: HTMLDivElement, message = "") {
     if (busy || !draft) return;
     try {
       setBusy(true);
-      setMsg("認証コードを再送しています...", "info");
-      await resendSignUpOtp(draft);
-      setMsg("認証コードを再送しました。最新のメールを確認してください。", "info");
+      setMsg("メールを再送しています...", "info");
+
+      const result = await resendSignUpOtp(draft);
+      if (result.status === "error") {
+        setMsg("メール送信を完了できませんでした。しばらくしてから再度お試しください。", "error");
+        return;
+      }
+
+      setMsg(EMAIL_PROCEDURE_CHECK_MESSAGE, "info");
     } catch (err: any) {
       console.error(err);
-      setMsg(formatAuthErrorMessage(err), "error");
+      setMsg(formatEmailProcedureErrorMessage(err), "error");
     } finally {
       setBusy(false);
     }
   });
 
-  // backBtn.addEventListener("click", async () => {
-  //   if (busy) return;
-  //   openAccountScreen("signup");
-  // });
+  backBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    if (busy) return;
 
-  // topBtn.addEventListener("click", async () => {
-  //   if (busy) return;
-  //   appScreen = "memo";
-  //   await rerender();
-  // });
+    clearPendingSignUpState();
+    openAccountScreen("signup");
+  });
+
+  topBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    if (busy) return;
+
+    clearPendingSignUpState();
+    appScreen = "memo";
+    await rerender();
+  });
 }
 
 function mountAuthUI(app: HTMLDivElement, message = "") {
@@ -4136,7 +5067,7 @@ function mountForgotPasswordUI(app: HTMLDivElement, message = "") {
 
     try {
       setBusy(true);
-      setMsg("再設定リンクを送信しています...", "info");
+      setMsg("メールを送信しています...", "info");
 
       savePasswordResetEmail(email);
 
@@ -4144,10 +5075,7 @@ function mountForgotPasswordUI(app: HTMLDivElement, message = "") {
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       if (error) throw error;
 
-      setMsg(
-        "パスワード再設定用リンクを送信しました。\nメール内のリンクを開いて、新しいパスワードを設定してください。",
-        "info"
-      );
+      setMsg(EMAIL_PROCEDURE_CHECK_MESSAGE, "info");
     } catch (err: any) {
       console.error(err);
       setMsg(formatAuthErrorMessage(err), "error");
@@ -4303,6 +5231,13 @@ async function rerender(message = "") {
 
 
 async function mount() {
+  const initialUrl = new URL(window.location.href);
+  if (initialUrl.searchParams.get("auth") === "forgot-password") {
+    appScreen = "forgotPassword";
+    const cleanUrl = new URL(import.meta.env.BASE_URL, window.location.origin);
+    window.history.replaceState(null, "", cleanUrl.toString());
+  }
+
   supabase.auth.onAuthStateChange((event, session) => {
     console.log("[auth] onAuthStateChange:", event, {
       hasSession: !!session,

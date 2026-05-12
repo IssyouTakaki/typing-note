@@ -318,6 +318,19 @@ body {
   background: #fbfbfc;
 }
 
+/* Input / Preview pane headers */
+.pane-left > .pane-header{
+  color: #174ea6;
+  background: #eef5ff;
+  border-bottom-color: #c7ddff;
+}
+
+.pane-right > .pane-header{
+  color: #137333;
+  background: #edf7f0;
+  border-bottom-color: #c8e6d0;
+}
+
 
 /* Input pane: anchor for tag suggestion popup */
 .pane-left{
@@ -454,10 +467,16 @@ body {
 
 .preview {
   flex: 1;
-  padding: 12px;
+  min-height: 0;
+  padding: 0;
   overflow: auto;
   tab-size: 4;
   -moz-tab-size: 4;
+}
+
+.preview > .md-preview{
+  min-height: 100%;
+  padding: 12px;
 }
 
 .preview-pre,
@@ -500,18 +519,23 @@ body {
 }
 
 /* --- Preview: minimal Markdown lists (- / 1.) --- */
+/* --- Preview: minimal Markdown lists (- / 1.) --- */
 .preview .md-ul,
 .preview .md-ol{
   margin: 8px 0;
-  padding-left: 22px;
+  padding-left: 2em;
+  padding-right: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  list-style-position: outside;
 }
 
 .preview .md-li{
   margin: 2px 0;
   line-height: 1.6;
-  white-space: pre;
-  overflow-wrap: normal;
-  word-break: normal;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .preview .md-cols-table{
@@ -574,9 +598,11 @@ body {
 }
 
 .preview .md-todo{
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
   gap: 10px;
+  max-width: 100%;
 }
 
 .preview .md-todo-checkbox{
@@ -589,9 +615,10 @@ body {
 
 .preview .md-todo-text{
   display: inline-block;
-  white-space: pre;
-  overflow-wrap: normal;
-  word-break: normal;
+  min-width: 0;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .preview .md-todo-checkbox:checked + .md-todo-text{
@@ -638,6 +665,58 @@ body {
   line-height: 1.55;
   white-space: pre;
 }
+
+/* --- Preview: minimal Markdown emphasis --- */
+.preview .md-strong{
+  font-weight: 700;
+}
+
+/* --- Preview: minimal Markdown links --- */
+.preview .md-link{
+  color: #0b57d0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.preview .md-link:hover{
+  color: #0842a0;
+}
+
+/* --- Preview: minimal Markdown tables (pipe table) --- */
+.preview .md-table-wrap{
+  margin: 10px 0;
+  max-width: 100%;
+  overflow: auto;
+}
+
+.preview .md-table{
+  border-collapse: collapse;
+  width: max-content;
+  min-width: min(100%, 420px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Noto Sans Mono CJK JP", "Noto Sans Mono", monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.preview .md-table th,
+.preview .md-table td{
+  padding: 6px 10px;
+  border: 1px solid #d0d7de;
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preview .md-table th{
+  background: #f6f7f9;
+  font-weight: 700;
+}
+
+.preview .md-table-align-left{ text-align: left; }
+.preview .md-table-align-center{ text-align: center; }
+.preview .md-table-align-right{ text-align: right; }
 
 .key-confirm-overlay{
   position: fixed;
@@ -1033,6 +1112,29 @@ body {
   font-size: 12px;
   color: #666;
   border-bottom: 1px solid #eef1f4;
+}
+
+.heading-popup-search{
+  width: calc(100% - 32px);
+  margin: 8px 16px 10px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid #e3e6ea;
+  background: #f6f7f9;
+  font-size: 14px;
+  outline: none;
+}
+
+.heading-popup-search:focus{
+  border-color: #0b57d0;
+  box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.18);
+}
+
+.heading-popup-empty{
+  padding: 16px;
+  color: #666;
+  font-size: 13px;
 }
 
 .heading-popup-list{
