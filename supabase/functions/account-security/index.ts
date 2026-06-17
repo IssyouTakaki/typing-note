@@ -135,7 +135,7 @@ function buildVerifyEmailMessage(
   otp: string,
   resolvedLocale: ResolvedLocale
 ) {
-  const maskedEmail = maskEmail(email);
+  const displayEmail = email;
 
   if (resolvedLocale === "ja") {
     const subject = "TypingNote サブメール確認コード";
@@ -143,7 +143,7 @@ function buildVerifyEmailMessage(
     const text = [
       "TypingNote のサブメール確認コードです。",
       "",
-      `送信先: ${maskedEmail}`,
+      `送信先: ${displayEmail}`,
       `確認コード: ${otp}`,
       "",
       `このコードは ${OTP_TTL_MINUTES} 分間有効です。`,
@@ -152,7 +152,7 @@ function buildVerifyEmailMessage(
 
     const html = `
       <p>TypingNote のサブメール確認コードです。</p>
-      <p>送信先: <strong>${maskedEmail}</strong></p>
+      <p>送信先: <strong>${displayEmail}</strong></p>
       <p>確認コード: <strong style="font-size: 20px; letter-spacing: 0.12em;">${otp}</strong></p>
       <p>このコードは ${OTP_TTL_MINUTES} 分間有効です。</p>
       <p>この手続きに心当たりがない場合、このメールは破棄して構いません。</p>
@@ -166,7 +166,7 @@ function buildVerifyEmailMessage(
   const text = [
     "This is your TypingNote security email verification code.",
     "",
-    `Destination: ${maskedEmail}`,
+    `Destination: ${displayEmail}`,
     `Verification code: ${otp}`,
     "",
     `This code is valid for ${OTP_TTL_MINUTES} minutes.`,
@@ -175,7 +175,7 @@ function buildVerifyEmailMessage(
 
   const html = `
     <p>This is your TypingNote security email verification code.</p>
-    <p>Destination: <strong>${maskedEmail}</strong></p>
+    <p>Destination: <strong>${displayEmail}</strong></p>
     <p>Verification code: <strong style="font-size: 20px; letter-spacing: 0.12em;">${otp}</strong></p>
     <p>This code is valid for ${OTP_TTL_MINUTES} minutes.</p>
     <p>If you did not request this, you can safely ignore this email.</p>
@@ -189,7 +189,7 @@ function buildLogin2faMessage(
   otp: string,
   resolvedLocale: ResolvedLocale
 ) {
-  const maskedEmail = maskEmail(email);
+  const displayEmail = email;
 
   if (resolvedLocale === "ja") {
     const subject = "TypingNote ログイン確認コード";
@@ -197,7 +197,7 @@ function buildLogin2faMessage(
     const text = [
       "TypingNote のログイン確認コードです。",
       "",
-      `送信先: ${maskedEmail}`,
+      `送信先: ${displayEmail}`,
       `確認コード: ${otp}`,
       "",
       `このコードは ${OTP_TTL_MINUTES} 分間有効です。`,
@@ -206,7 +206,7 @@ function buildLogin2faMessage(
 
     const html = `
       <p>TypingNote のログイン確認コードです。</p>
-      <p>送信先: <strong>${maskedEmail}</strong></p>
+      <p>送信先: <strong>${displayEmail}</strong></p>
       <p>確認コード: <strong style="font-size: 20px; letter-spacing: 0.12em;">${otp}</strong></p>
       <p>このコードは ${OTP_TTL_MINUTES} 分間有効です。</p>
       <p>このログインに心当たりがない場合、パスワードの変更を検討してください。</p>
@@ -220,7 +220,7 @@ function buildLogin2faMessage(
   const text = [
     "This is your TypingNote login verification code.",
     "",
-    `Destination: ${maskedEmail}`,
+    `Destination: ${displayEmail}`,
     `Verification code: ${otp}`,
     "",
     `This code is valid for ${OTP_TTL_MINUTES} minutes.`,
@@ -229,7 +229,7 @@ function buildLogin2faMessage(
 
   const html = `
     <p>This is your TypingNote login verification code.</p>
-    <p>Destination: <strong>${maskedEmail}</strong></p>
+    <p>Destination: <strong>${displayEmail}</strong></p>
     <p>Verification code: <strong style="font-size: 20px; letter-spacing: 0.12em;">${otp}</strong></p>
     <p>This code is valid for ${OTP_TTL_MINUTES} minutes.</p>
     <p>If you did not try to sign in, consider changing your password.</p>
@@ -243,7 +243,7 @@ function buildLoginEmailChangeMessage(
   otp: string,
   resolvedLocale: ResolvedLocale
 ) {
-  const maskedEmail = maskEmail(email);
+  const displayEmail = email;
 
   if (resolvedLocale === "ja") {
     const subject = "TypingNote ログイン用メールアドレス変更確認コード";
@@ -251,7 +251,7 @@ function buildLoginEmailChangeMessage(
     const text = [
       "TypingNote のログイン用メールアドレス変更確認コードです。",
       "",
-      `新しいログイン用メールアドレス: ${maskedEmail}`,
+      `新しいログイン用メールアドレス: ${displayEmail}`,
       `確認コード: ${otp}`,
       "",
       `このコードは ${OTP_TTL_MINUTES} 分間有効です。`,
@@ -260,7 +260,7 @@ function buildLoginEmailChangeMessage(
 
     const html = `
       <p>TypingNote のログイン用メールアドレス変更確認コードです。</p>
-      <p>新しいログイン用メールアドレス: <strong>${maskedEmail}</strong></p>
+      <p>新しいログイン用メールアドレス: <strong>${displayEmail}</strong></p>
       <p>確認コード: <strong style="font-size: 20px; letter-spacing: 0.12em;">${otp}</strong></p>
       <p>このコードは ${OTP_TTL_MINUTES} 分間有効です。</p>
       <p>この手続きに心当たりがない場合、パスワードを変更し、サブメール設定を確認してください。</p>
@@ -274,7 +274,7 @@ function buildLoginEmailChangeMessage(
   const text = [
     "This is your TypingNote login email change verification code.",
     "",
-    `New login email: ${maskedEmail}`,
+    `New login email: ${displayEmail}`,
     `Verification code: ${otp}`,
     "",
     `This code is valid for ${OTP_TTL_MINUTES} minutes.`,
@@ -283,7 +283,7 @@ function buildLoginEmailChangeMessage(
 
   const html = `
     <p>This is your TypingNote login email change verification code.</p>
-    <p>New login email: <strong>${maskedEmail}</strong></p>
+    <p>New login email: <strong>${displayEmail}</strong></p>
     <p>Verification code: <strong style="font-size: 20px; letter-spacing: 0.12em;">${otp}</strong></p>
     <p>This code is valid for ${OTP_TTL_MINUTES} minutes.</p>
     <p>If you did not request this, change your password and review your security emails.</p>
@@ -419,7 +419,7 @@ async function sendVerifyEmailOtp(req: Request, body: RequestBody) {
       status: "already_verified",
       message: "このメールアドレスはすでに確認済みです。",
       accountEmailId: accountEmail.id,
-      maskedEmail: maskEmail(email),
+      maskedEmail: accountEmail.email,
     });
   }
 
@@ -487,7 +487,7 @@ async function sendVerifyEmailOtp(req: Request, body: RequestBody) {
     status: "sent",
     message: "確認コードを送信しました。",
     accountEmailId: accountEmail.id,
-    maskedEmail: maskEmail(email),
+    maskedEmail: accountEmail.email,
     expiresInMinutes: OTP_TTL_MINUTES,
   });
 }
@@ -537,7 +537,7 @@ async function verifyEmailOtp(req: Request, body: RequestBody) {
       status: "already_verified",
       message: "このメールアドレスはすでに確認済みです。",
       accountEmailId: accountEmail.id,
-      maskedEmail: maskEmail(accountEmail.email),
+      maskedEmail: accountEmail.email,
     });
   }
 
@@ -645,7 +645,7 @@ const { error: verifyEmailError } = await admin
     status: "verified",
     message: "メールアドレスを確認しました。",
     accountEmailId: accountEmail.id,
-    maskedEmail: maskEmail(accountEmail.email),
+    maskedEmail: accountEmail.email,
   });
 }
 
@@ -1088,7 +1088,7 @@ async function sendChangeLoginEmailOtp(req: Request, body: RequestBody) {
       "Verification code sent to the new login email."
     ),
     accountEmailId: accountEmail.id,
-    maskedEmail: maskEmail(accountEmail.email),
+    maskedEmail: accountEmail.email,
     expiresInMinutes: OTP_TTL_MINUTES,
   });
 }
@@ -1366,7 +1366,7 @@ async function promoteAccountEmailToLogin(req: Request, body: RequestBody) {
             "Login email changed."
           ),
     loginEmail: accountEmail.email,
-    maskedLoginEmail: maskEmail(accountEmail.email),
+    maskedLoginEmail: accountEmail.email,
     oldLoginEmailRetained,
     cleanupErrors,
   });

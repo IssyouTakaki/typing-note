@@ -272,25 +272,6 @@ import { qs } from "../../utils/dom";
     return email.trim().toLowerCase();
   }
 
-  function maskEmailAddress(email: string) {
-    const [local = "", domain = ""] = email.split("@");
-    const [domainName = "", ...domainRest] = domain.split(".");
-  
-    const maskedLocal =
-      local.length <= 1
-        ? "*"
-        : `${local[0]}${"*".repeat(Math.max(5, local.length - 1))}`;
-  
-    const maskedDomainName =
-      domainName.length <= 1
-        ? "*"
-        : `${domainName[0]}${"*".repeat(Math.max(5, domainName.length - 1))}`;
-  
-    const suffix = domainRest.length ? `.${domainRest.join(".")}` : "";
-  
-    return `${maskedLocal}@${maskedDomainName}${suffix}`;
-  }
-  
   const TERMS_VERSION = "v1";
   const PRIVACY_VERSION = "v1";
   const PENDING_SIGNUP_STORAGE_KEY = "typingnote.pending-signup";
@@ -1407,7 +1388,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
         const address = document.createElement("div");
         address.className = "account-email-address";
-        address.textContent = maskEmailAddress(item.email);
+        address.textContent = item.email;
 
         const meta = document.createElement("div");
         meta.className = "account-email-meta";
@@ -1444,12 +1425,12 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
           promoteBtn.className = "account-email-action-btn";
           promoteBtn.dataset.accountEmailPromoteBtn = "true";
           promoteBtn.dataset.accountEmailId = item.id;
-          promoteBtn.dataset.accountEmailLabel = maskEmailAddress(item.email);
+          promoteBtn.dataset.accountEmailLabel = item.email;
           promoteBtn.textContent = t("accountUseAsLogin");
           promoteBtn.setAttribute(
             "aria-label",
             formatI18n(t("accountUseAsLoginAria"), {
-              email: maskEmailAddress(item.email),
+              email: item.email,
             })
           );
           actions.append(promoteBtn);
@@ -1460,12 +1441,12 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         deleteBtn.className = "account-email-delete-btn";
         deleteBtn.dataset.accountEmailDeleteBtn = "true";
         deleteBtn.dataset.accountEmailId = item.id;
-        deleteBtn.dataset.accountEmailLabel = maskEmailAddress(item.email);
+        deleteBtn.dataset.accountEmailLabel = item.email;
         deleteBtn.textContent = t("accountDelete");
         deleteBtn.setAttribute(
           "aria-label",
           formatI18n(t("accountDeleteAria"), {
-            email: maskEmailAddress(item.email),
+            email: item.email,
           })
         );
         actions.append(deleteBtn);
@@ -1513,11 +1494,11 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
           pendingLoginEmailChange = {
             accountEmailId: result.accountEmailId,
-            maskedEmail: result.maskedEmail,
+            maskedEmail: accountEmailLabel,
           };
 
           loginEmailChangeOtpArea.hidden = false;
-          loginEmailChangeOtpTarget.textContent = result.maskedEmail;
+          loginEmailChangeOtpTarget.textContent = accountEmailLabel;
           loginEmailChangeOtpInput.value = "";
           setLoginEmailChangeMsg(
             result.message ?? t("accountVerificationCodeSent"),
@@ -1594,9 +1575,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
       currentLoginEmailForCompare = normalizeEmailForCompare(loginEmail);
 
-      currentLoginEmailEl.textContent = loginEmail
-        ? maskEmailAddress(loginEmail)
-        : t("accountUnknown");
+      currentLoginEmailEl.textContent = loginEmail || t("accountUnknown");
 
       renderAccountEmailList(accountEmails);
     };
@@ -1695,11 +1674,11 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         
         pendingAccountEmailVerification = {
           accountEmailId: result.accountEmailId,
-          maskedEmail: result.maskedEmail,
+          maskedEmail: email,
         };
         
         accountEmailOtpArea.hidden = false;
-        accountEmailOtpTarget.textContent = result.maskedEmail;
+        accountEmailOtpTarget.textContent = email;
         accountEmailOtpInput.value = "";
         
         await refreshAccountEmails();
