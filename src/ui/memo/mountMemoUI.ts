@@ -30,12 +30,14 @@ import {
   isSearchShortcut,
   isHeadingPopupShortcut,
   isAccountSettingsShortcut,
+  isFeedbackShortcut,
   getShortcutDigit,
 } from "../../shortcuts/shortcutPredicates";
 import { getLineStartIndex, registerTextareaEditing } from "../../editor/textareaEditing";
 import { escapeHtml } from "../../utils/html";
 import { qs } from "../../utils/dom";
 import { t } from "../../i18n/i18n";
+import { submitFeedback } from "../../repos/feedbackRepo";
 import {
   getAppScreen,
   openAccountScreen,
@@ -292,6 +294,8 @@ function extractPseudoTags(text: string): string[] {
 
 const TAB_TITLE_MAX = 22;
 const MAX_TABS = 8;
+const FEEDBACK_MESSAGE_MAX_LENGTH = 4000;
+const FEEDBACK_SELECTED_TEXT_MAX_LENGTH = 2000;
 
 function extractFirstLineTitle(text: string, maxLen: number) {
   const first = (text.split("\n")[0] ?? "").trim();
@@ -317,11 +321,10 @@ let toggleEditWideHandler: (() => Promise<void>) | null = null;
 // let alignIndentShortcutHandler: (() => Promise<void>) | null = null;
 
 let renderTabsHandler: (() => void) | null = null;
-let upsertSavedMemoTagSourceHandler: ((memo: MemoContentRow) => void) | null = null;
-let removeSavedMemoTagSourceHandler: ((id: string) => void) | null = null;
 
 let openHeadingListPopupHandler: (() => Promise<void>) | null = null;
 let openSearchHandler: (() => Promise<void>) | null = null;
+let openFeedbackDialogHandler: (() => Promise<void>) | null = null;
 
 // --- List focus / multi-select (Explorer & Dust) ---
 let explorerSelectToggleHandler: (() => Promise<void>) | null = null;
@@ -332,6 +335,7 @@ let dustMoveFocusHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
 let dustOpenFocusHandler: (() => Promise<void>) | null = null;
 
 let teardownPanesResize: (() => void) | null = null;
+let teardownFeedbackDialog: (() => void) | null = null;
 
 type MemoViewportState = {
   selectionStart: number;
@@ -743,6 +747,21 @@ function registerSaveShortcut() {
         openAccountSettingsScreen();
       } else {
         openAccountScreen("signin");
+      }
+      return;
+    }
+
+    if (isFeedbackShortcut(e)) {
+      e.preventDefault();
+
+      const session = await getSession();
+      if (!session) {
+        openAccountScreen("signin", "Sign in to send feedback.", "info");
+        return;
+      }
+
+      if (openFeedbackDialogHandler) {
+        void openFeedbackDialogHandler();
       }
       return;
     }
@@ -1649,6 +1668,324 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     });
   };
 
+  const closeFeedbackDialog = (restoreFocus = true) => {
+    if (!teardownFeedbackDialog) return;
+    const teardown = teardownFeedbackDialog;
+    teardownFeedbackDialog = null;
+    teardown();
+
+    if (restoreFocus) {
+      focusEditorInputIfVisible();
+    }
+  };
+
+  const getSelectedMemoTextForFeedback = () => {
+    if (state.view !== "editor" || activeTab().mode !== "editor") return "";
+
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? start;
+    if (end <= start) return "";
+
+    return input.value.slice(start, end);
+  };
+
+  const getFeedbackEnvironment = () => {
+    const tab = activeTab();
+
+    return {
+      appScreen: getAppScreen(),
+      view: state.view,
+      activeTabMode: tab.mode,
+      hasSavedMemo: String(Boolean(tab.currentMemoId)),
+      viewport: `${window.innerWidth}x${window.innerHeight}`,
+      screen: `${window.screen.width}x${window.screen.height}`,
+      language: navigator.language,
+      languages: navigator.languages.join(", "),
+      platform: navigator.platform,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? "",
+      url: `${window.location.origin}${window.location.pathname}`,
+      userAgent: navigator.userAgent,
+    };
+  };
+
+  const stringifyFeedbackEnvironment = (environment: Record<string, string>) =>
+    Object.entries(environment)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join("\n");
+
+  const formatFeedbackError = (error: unknown) => {
+    if (error instanceof Error && error.message.trim()) {
+      return error.message;
+    }
+
+    const raw = String(error ?? "").trim();
+    return raw || "Could not send feedback. Please try again later.";
+  };
+
+  const openFeedbackDialog = async () => {
+    const session = await getSession();
+    if (!session) {
+      openAccountScreen("signin", "Sign in to send feedback.", "info");
+      return;
+    }
+
+    closeHeadingPopup(false);
+    closeFeedbackDialog(false);
+
+    const selectedText = getSelectedMemoTextForFeedback();
+    const environment = getFeedbackEnvironment();
+    const environmentText = stringifyFeedbackEnvironment(environment);
+
+    const overlay = document.createElement("div");
+    overlay.className = "feedback-dialog-overlay";
+
+    const form = document.createElement("form");
+    form.className = "feedback-dialog";
+    form.setAttribute("role", "dialog");
+    form.setAttribute("aria-modal", "true");
+    form.setAttribute("aria-labelledby", "feedbackDialogTitle");
+
+    const title = document.createElement("div");
+    title.id = "feedbackDialogTitle";
+    title.className = "feedback-dialog-title";
+    title.textContent = "Feedback";
+
+    const msg = document.createElement("div");
+    msg.className = "feedback-dialog-msg";
+    msg.hidden = true;
+
+    const feedbackLabel = document.createElement("label");
+    feedbackLabel.className = "feedback-dialog-label";
+    feedbackLabel.htmlFor = "feedbackMessageInput";
+    feedbackLabel.textContent = "Message";
+
+    const feedbackInput = document.createElement("textarea");
+    feedbackInput.id = "feedbackMessageInput";
+    feedbackInput.className = "feedback-dialog-input";
+    feedbackInput.maxLength = FEEDBACK_MESSAGE_MAX_LENGTH;
+    feedbackInput.required = true;
+    feedbackInput.spellcheck = true;
+
+    const feedbackCounter = document.createElement("div");
+    feedbackCounter.className = "feedback-dialog-counter";
+
+    const detailsButton = document.createElement("button");
+    detailsButton.type = "button";
+    detailsButton.className = "feedback-dialog-details-button";
+    detailsButton.setAttribute("aria-expanded", "false");
+    detailsButton.textContent = "Details";
+
+    const details = document.createElement("div");
+    details.className = "feedback-dialog-details";
+    details.hidden = true;
+
+    const selectionId = "feedbackIncludeSelection";
+    const selectionCheck = document.createElement("input");
+    selectionCheck.id = selectionId;
+    selectionCheck.type = "checkbox";
+    selectionCheck.disabled = selectedText.trim().length === 0;
+
+    const selectionLabel = document.createElement("label");
+    selectionLabel.className = "feedback-dialog-check";
+    selectionLabel.htmlFor = selectionId;
+    selectionLabel.append(selectionCheck, document.createTextNode("Include selected text"));
+
+    const selectionInput = document.createElement("textarea");
+    selectionInput.className = "feedback-dialog-context-input";
+    selectionInput.maxLength = FEEDBACK_SELECTED_TEXT_MAX_LENGTH;
+    selectionInput.value = selectedText.slice(0, FEEDBACK_SELECTED_TEXT_MAX_LENGTH);
+    selectionInput.disabled = true;
+    selectionInput.spellcheck = false;
+    selectionInput.placeholder = selectedText.trim() ? "" : "No selected text";
+
+    const selectionCounter = document.createElement("div");
+    selectionCounter.className = "feedback-dialog-counter";
+
+    const environmentId = "feedbackIncludeEnvironment";
+    const environmentCheck = document.createElement("input");
+    environmentCheck.id = environmentId;
+    environmentCheck.type = "checkbox";
+
+    const environmentLabel = document.createElement("label");
+    environmentLabel.className = "feedback-dialog-check";
+    environmentLabel.htmlFor = environmentId;
+    environmentLabel.append(environmentCheck, document.createTextNode("Include environment"));
+
+    const environmentInput = document.createElement("textarea");
+    environmentInput.className = "feedback-dialog-context-input";
+    environmentInput.value = environmentText;
+    environmentInput.disabled = true;
+    environmentInput.readOnly = true;
+    environmentInput.spellcheck = false;
+
+    details.append(
+      selectionLabel,
+      selectionInput,
+      selectionCounter,
+      environmentLabel,
+      environmentInput
+    );
+
+    const actions = document.createElement("div");
+    actions.className = "feedback-dialog-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "feedback-dialog-button feedback-dialog-button-secondary";
+    cancelButton.textContent = "Cancel";
+
+    const submitButton = document.createElement("button");
+    submitButton.type = "submit";
+    submitButton.className = "feedback-dialog-button feedback-dialog-button-primary";
+    submitButton.textContent = "Send";
+
+    actions.append(cancelButton, submitButton);
+    form.append(
+      title,
+      msg,
+      feedbackLabel,
+      feedbackInput,
+      feedbackCounter,
+      detailsButton,
+      details,
+      actions
+    );
+    overlay.append(form);
+    document.body.append(overlay);
+
+    let busy = false;
+
+    const setMsg = (text: string, kind: "info" | "error" = "error") => {
+      if (!text) {
+        msg.hidden = true;
+        msg.textContent = "";
+        return;
+      }
+
+      msg.hidden = false;
+      msg.textContent = text;
+      msg.dataset.kind = kind;
+    };
+
+    const setBusy = (value: boolean) => {
+      busy = value;
+      feedbackInput.disabled = value;
+      detailsButton.disabled = value;
+      selectionCheck.disabled = value || selectedText.trim().length === 0;
+      selectionInput.disabled = value || !selectionCheck.checked;
+      environmentCheck.disabled = value;
+      environmentInput.disabled = value || !environmentCheck.checked;
+      cancelButton.disabled = value;
+      submitButton.disabled = value;
+      submitButton.textContent = value ? "Sending..." : "Send";
+    };
+
+    const updateCounters = () => {
+      feedbackCounter.textContent = `${feedbackInput.value.length}/${FEEDBACK_MESSAGE_MAX_LENGTH}`;
+      selectionCounter.textContent = `${selectionInput.value.length}/${FEEDBACK_SELECTED_TEXT_MAX_LENGTH}`;
+    };
+
+    const syncOptionalInputs = () => {
+      selectionInput.disabled = busy || !selectionCheck.checked;
+      environmentInput.disabled = busy || !environmentCheck.checked;
+    };
+
+    detailsButton.addEventListener("click", () => {
+      const nextOpen = details.hidden;
+      details.hidden = !nextOpen;
+      detailsButton.setAttribute("aria-expanded", String(nextOpen));
+    });
+
+    feedbackInput.addEventListener("input", () => {
+      setMsg("");
+      updateCounters();
+    });
+
+    selectionInput.addEventListener("input", updateCounters);
+    selectionCheck.addEventListener("change", syncOptionalInputs);
+    environmentCheck.addEventListener("change", syncOptionalInputs);
+
+    cancelButton.addEventListener("click", () => {
+      if (busy) return;
+      closeFeedbackDialog(true);
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (busy) return;
+
+      const message = feedbackInput.value.trim();
+      const optionalSelection = selectionCheck.checked
+        ? selectionInput.value.trim()
+        : "";
+
+      if (!message) {
+        setMsg("Enter feedback before sending.", "error");
+        feedbackInput.focus();
+        return;
+      }
+
+      try {
+        setBusy(true);
+        setMsg("Sending feedback...", "info");
+
+        await submitFeedback({
+          message,
+          selectedText: optionalSelection || undefined,
+          environment: environmentCheck.checked ? environment : undefined,
+        });
+
+        closeFeedbackDialog(true);
+        showMessage("Feedback sent. Thank you.");
+      } catch (error) {
+        console.error("feedback failed", error);
+        setMsg(formatFeedbackError(error), "error");
+      } finally {
+        if (document.body.contains(overlay)) {
+          setBusy(false);
+        }
+      }
+    });
+
+    function onOverlayClick(event: MouseEvent) {
+      if (event.target !== overlay || busy) return;
+      closeFeedbackDialog(true);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.isComposing) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!busy) closeFeedbackDialog(true);
+        return;
+      }
+
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        event.stopPropagation();
+        form.requestSubmit();
+      }
+    }
+
+    overlay.addEventListener("click", onOverlayClick);
+    window.addEventListener("keydown", onKeyDown, true);
+
+    teardownFeedbackDialog = () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      overlay.removeEventListener("click", onOverlayClick);
+      overlay.remove();
+    };
+
+    updateCounters();
+    syncOptionalInputs();
+
+    window.requestAnimationFrame(() => {
+      feedbackInput.focus();
+    });
+  };
+
   const openMemoFromExplorer = async (id: string) => {
     if (await activateMemoTabIfAlreadyOpen(id)) return;
 
@@ -2191,6 +2528,10 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     await openHeadingPopup();
   };
 
+  openFeedbackDialogHandler = async () => {
+    await openFeedbackDialog();
+  };
+
   openSearchHandler = async () => {
     console.info("[search] openSearchHandler invoked", {
       view: state.view,
@@ -2310,40 +2651,6 @@ const loadSavedMemoTagSource = (options: { force?: boolean; updatePopup?: boolea
 
   return savedMemoTagSourceLoading;
 };
-
-const refreshSavedMemoTagSource = () => {
-  savedMemoTagSourceLoaded = false;
-  savedMemoTagSource = [];
-  savedMemoTagSourceUserId = null;
-  tagDictBuiltAt = 0;
-  rebuildTagDict();
-  void loadSavedMemoTagSource({ force: true, updatePopup: true });
-};
-
-const upsertSavedMemoTagSource = (memo: MemoContentRow) => {
-  if (!savedMemoTagSourceLoaded) return;
-
-  const idx = savedMemoTagSource.findIndex((m) => m.id === memo.id);
-  if (idx >= 0) savedMemoTagSource[idx] = memo;
-  else savedMemoTagSource.unshift(memo);
-
-  tagDictBuiltAt = 0;
-  rebuildTagDict();
-};
-
-const removeSavedMemoTagSource = (id: string) => {
-  if (!savedMemoTagSourceLoaded) return;
-
-  const next = savedMemoTagSource.filter((m) => m.id !== id);
-  if (next.length === savedMemoTagSource.length) return;
-
-  savedMemoTagSource = next;
-  tagDictBuiltAt = 0;
-  rebuildTagDict();
-};
-
-upsertSavedMemoTagSourceHandler = upsertSavedMemoTagSource;
-removeSavedMemoTagSourceHandler = removeSavedMemoTagSource;
 
 const rebuildTagDict = () => {
   const map = new Map<string, TagEntry>();
@@ -3593,6 +3900,10 @@ export function resetMemoScreenHandlers() {
   renderTabsHandler = null;
   openHeadingListPopupHandler = null;
   openSearchHandler = null;
+  openFeedbackDialogHandler = null;
+
+  teardownFeedbackDialog?.();
+  teardownFeedbackDialog = null;
 
   teardownPanesResize?.();
   teardownPanesResize = null;

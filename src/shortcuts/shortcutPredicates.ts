@@ -115,10 +115,10 @@ export function isSaveShortcut(e: KeyboardEvent) {
     const keyRow = e.key;
     if (typeof keyRow !== "string") return false;
     if (keyRow.toLowerCase() !== "i") return false;
-  
+
     const isMac = navigator.platform.toLowerCase().includes("mac");
     const hasMod = isMac ? e.metaKey : e.ctrlKey;
-  
+
     return e.altKey && e.shiftKey && hasMod;
   }
 
@@ -130,6 +130,17 @@ export function isSaveShortcut(e: KeyboardEvent) {
     const isMac = navigator.platform.toLowerCase().includes("mac");
     const hasMod = isMac ? e.metaKey : e.ctrlKey;
   
+    return e.altKey && e.shiftKey && hasMod;
+  }
+
+  export function isFeedbackShortcut(e: KeyboardEvent) {
+    const keyRow = e.key;
+    if (typeof keyRow !== "string") return false;
+    if (keyRow.toLowerCase() !== "m") return false;
+
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    const hasMod = isMac ? e.metaKey : e.ctrlKey;
+
     return e.altKey && e.shiftKey && hasMod;
   }
   
