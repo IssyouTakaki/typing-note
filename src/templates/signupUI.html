@@ -2,7 +2,7 @@
     <form id="signupForm" class="auth-card" autocomplete="on">
         <div class="auth-title">TypingNote Sign up</div>
 
-        <div class="auth-help">
+        <div id="signupHelp" class="auth-help">
             アカウント情報を入力すると、次の画面でメール確認に進みます。
         </div>
 
@@ -31,15 +31,15 @@
         <label class="auth-label">Confirm password</label>
         <input id="signupPassword2" class="auth-input" type="password" autocomplete="new-password" placeholder="必須" />
         
-        <div class="auth-note">
-          Password は 8 文字以上で、英大文字・英小文字・数字・記号を各 1 文字以上含めてください。
+        <div id="signupPasswordNote" class="auth-note">
+            Password は 8 文字以上で、英大文字・英小文字・数字を各 1 文字以上含めてください。
         </div>
 
         <label class="auth-check">
             <input id="agreeTerms" type="checkbox" />
             <span>
                 <button id="openTermsBtn" class="auth-inline-link" type="button">利用規約</button>
-                に同意する
+                <span id="agreeTermsText">に同意する</span>
             </span>
         </label>
         
@@ -47,7 +47,7 @@
             <input id="agreePrivacy" type="checkbox" />
             <span>
                 <button id="openPrivacyBtn" class="auth-inline-link" type="button">プライバシーポリシー</button>
-                に同意する
+                <span id="agreePrivacyText">に同意する</span>
             </span>
         </label>
 
