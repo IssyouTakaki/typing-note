@@ -1,0 +1,152 @@
+<div class="layout auth-layout">
+    <form id="accountSettingsForm" class="auth-card" autocomplete="off">
+        <div id="accountSettingsTitle" class="auth-title">アカウント設定</div>
+
+        <div id="accountSettingsHelp" class="auth-help">
+            表示言語、ログイン用メールアドレス、サブメール、パスワードを管理できます。
+        </div>
+
+        <div id="accountSettingsMsg" class="auth-msg" hidden></div>
+
+        <section class="account-section">
+            <div id="accountLanguageSectionTitle" class="account-section-title">表示言語</div>
+
+            <label id="accountLanguageLabel" class="auth-label" for="localePreferenceSelect">
+                表示言語
+            </label>
+
+            <select id="localePreferenceSelect" class="auth-input">
+                <option id="localeOptionAuto" value="auto">ブラウザ設定に合わせる</option>
+                <option id="localeOptionJa" value="ja">日本語</option>
+                <option id="localeOptionEn" value="en">English</option>
+            </select>
+        </section>
+
+        <section class="account-section">
+            <div id="accountLoginEmailTitle" class="account-section-title">ログイン用メールアドレス</div>
+            <div id="currentLoginEmail" class="account-readonly-value">読み込み中...</div>
+            <div id="accountLoginEmailNote" class="auth-note">
+                ログイン用メールアドレスを変更するには、確認済みのサブメールを選択し、送信された確認コードを入力してください。
+            </div>
+
+            <div id="loginEmailChangeMsg" class="auth-msg" hidden></div>
+
+            <div id="loginEmailChangeOtpArea" class="account-otp-area" hidden>
+                <div class="auth-note">
+                    <span id="loginEmailChangeOtpPrefix">確認コードの送信先: </span>
+                    <strong id="loginEmailChangeOtpTarget"></strong>
+                </div>
+
+                <label id="loginEmailChangeOtpLabel" class="auth-label" for="loginEmailChangeOtpInput">確認コード</label>
+                <input
+                    id="loginEmailChangeOtpInput"
+                    class="auth-input auth-otp-input"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="6"
+                    autocomplete="one-time-code"
+                    placeholder="000000"
+                />
+
+                <button id="confirmLoginEmailChangeBtn" class="auth-btn auth-btn-primary account-full-btn" type="button">
+                    ログイン用メールアドレスを変更
+                </button>
+            </div>
+        </section>
+
+        <section class="account-section">
+            <div id="accountSecurityEmailsTitle" class="account-section-title">サブメール</div>
+            <div id="accountSecurityEmailsNote" class="auth-note">
+                サブメールはログイン確認、パスワード再設定、ログイン用メールアドレスの変更に使用できます。
+            </div>
+
+            <div id="accountEmailList" class="account-email-list">
+                <div class="account-email-empty">読み込み中...</div>
+            </div>
+
+            <label id="addAccountEmailLabel" class="auth-label" for="addAccountEmailInput">サブメールを追加</label>
+
+            <div id="accountEmailInputMsg" class="auth-msg" hidden></div>
+
+            <input
+                id="addAccountEmailInput"
+                class="auth-input"
+                type="email"
+                autocomplete="email"
+                placeholder="sub@example.com"
+            />
+
+            <button id="sendAccountEmailOtpBtn" class="auth-btn auth-btn-secondary account-full-btn" type="button">
+                確認コードを送信
+            </button>
+
+            <div id="accountEmailOtpArea" class="account-otp-area" hidden>
+                <div class="auth-note">
+                    <span id="accountEmailOtpPrefix">確認コードの送信先: </span>
+                    <strong id="accountEmailOtpTarget"></strong>
+                </div>
+
+                <label id="accountEmailOtpLabel" class="auth-label" for="accountEmailOtpInput">確認コード</label>
+                <input
+                    id="accountEmailOtpInput"
+                    class="auth-input auth-otp-input"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="6"
+                    autocomplete="one-time-code"
+                    placeholder="000000"
+                />
+
+                <button id="verifyAccountEmailOtpBtn" class="auth-btn auth-btn-primary account-full-btn" type="button">
+                    メールアドレスを確認
+                </button>
+            </div>
+        </section>
+
+        <section class="account-section">
+            <div id="accountPasswordTitle" class="account-section-title">パスワード</div>
+            <div id="accountPasswordNote" class="auth-note">
+                新しいパスワードを設定する前に、現在のパスワードを入力してください。変更後はログアウトされます。
+            </div>
+
+            <div id="passwordChangeMsg" class="auth-msg" hidden></div>
+
+            <label id="currentPasswordLabel" class="auth-label" for="currentPasswordInput">現在のパスワード</label>
+            <input
+                id="currentPasswordInput"
+                class="auth-input"
+                type="password"
+                autocomplete="current-password"
+            />
+
+            <label id="newAccountPasswordLabel" class="auth-label" for="newAccountPasswordInput">新しいパスワード</label>
+            <input
+                id="newAccountPasswordInput"
+                class="auth-input"
+                type="password"
+                autocomplete="new-password"
+            />
+
+            <label id="newAccountPasswordConfirmLabel" class="auth-label" for="newAccountPasswordConfirmInput">新しいパスワード（確認）</label>
+            <input
+                id="newAccountPasswordConfirmInput"
+                class="auth-input"
+                type="password"
+                autocomplete="new-password"
+            />
+
+            <button id="changePasswordBtn" class="auth-btn auth-btn-primary account-full-btn" type="button">
+                パスワードを変更
+            </button>
+        </section>
+
+        <div class="auth-actions auth-actions-stack-mobile">
+            <button id="accountSettingsSaveBtn" class="auth-btn auth-btn-primary" type="submit">
+                Save
+            </button>
+            <button id="accountSettingsBackBtn" class="auth-btn auth-btn-secondary" type="button">
+                Back to TypingNote
+            </button>
+        </div>
+    </form>
+</div>

@@ -627,7 +627,7 @@ body {
 }
 
 .preview .md-blank{
-  height: 10px;
+  height: calc(14px * 1.6);
 }
 
 /* --- Preview: minimal Markdown horizontal rule (---) --- */
@@ -806,6 +806,11 @@ body {
   margin-top: 12px;
 }
 
+/* Sign up: password policy note と同意チェックボックスの間隔 */
+#signupPasswordNote{
+  margin-bottom: 16px;
+}
+
 .auth-msg{
   white-space: pre-wrap;
   font-size: 12px;
@@ -906,6 +911,167 @@ body {
 .auth-btn-link:hover{
   background: rgba(11, 87, 208, 0.06);
   color: #0842a0;
+}
+
+/* --- Account settings --- */
+.account-section{
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #eef1f4;
+}
+
+.account-section-title{
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #111;
+}
+
+.account-readonly-value{
+  padding: 10px;
+  border: 1px solid #e3e6ea;
+  border-radius: 10px;
+  background: #f6f7f9;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Noto Sans Mono CJK JP", "Noto Sans Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.account-email-list{
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.account-email-empty{
+  padding: 10px;
+  border: 1px dashed #d0d7de;
+  border-radius: 10px;
+  color: #666;
+  font-size: 12px;
+  background: #fbfbfc;
+}
+
+.account-email-item{
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+
+  padding: 10px;
+  border: 1px solid #e3e6ea;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.account-email-delete-btn{
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid #e7c7cc;
+  border-radius: 999px;
+  background: #fffafb;
+  color: #a33a4a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.account-email-delete-btn:hover{
+  background: #fff1f3;
+  border-color: #dca6af;
+}
+
+.account-email-delete-btn:disabled{
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.account-email-actions{
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.account-email-action-btn{
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid #c9d8ef;
+  border-radius: 999px;
+  background: #f7fbff;
+  color: #2457a6;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.account-email-action-btn:hover{
+  background: #edf5ff;
+  border-color: #aac4ea;
+}
+
+.account-email-action-btn:disabled{
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.account-email-main{
+  min-width: 0;
+}
+
+.account-email-address{
+  font-size: 13px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Noto Sans Mono CJK JP", "Noto Sans Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.account-email-meta{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.account-email-badge{
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #d0d7de;
+  background: #f6f7f9;
+  color: #555;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.account-email-badge-verified{
+  border-color: #b7dfc1;
+  background: #edf7f0;
+  color: #137333;
+}
+
+.account-email-badge-pending{
+  border-color: #f0d6a6;
+  background: #fff8e6;
+  color: #8a5a00;
+}
+
+.account-full-btn{
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.account-otp-area{
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #e3e6ea;
+  border-radius: 12px;
+  background: #fbfbfc;
 }
 
 .btn{

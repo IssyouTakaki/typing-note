@@ -10,6 +10,8 @@ export type MemoRow = {
   deleted_at?: string | null;
 };
 
+export type MemoContentRow = Pick<MemoRow, "id" | "content" | "created_at" | "updated_at">;
+
 export async function createMemo(params: { userId: string; content: string }) {
   const { userId, content } = params;
 
@@ -37,6 +39,32 @@ export async function listMemos(params: { userId: string; limit?: number }) {
 
   if (error) throw error;
   return (data ?? []) as MemoRow[];
+}
+
+export async function listAllMemoContents(params: { userId: string; pageSize?: number }) {
+  const { userId, pageSize = 1000 } = params;
+  const rows: MemoContentRow[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const to = from + pageSize - 1;
+
+    const { data, error } = await supabase
+      .from("memos")
+      .select("id,content,created_at,updated_at")
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    const page = (data ?? []) as MemoContentRow[];
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+  }
+
+  return rows;
 }
 
 export async function getMemo(params: { userId: string; id: string }) {
