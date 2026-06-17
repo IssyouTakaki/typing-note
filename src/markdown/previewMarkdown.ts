@@ -157,9 +157,13 @@ function renderInlineCode(input: string): string {
   return renderInlineMarkdown(input);
 }
 
+function sourceLineAttrs(startLine: number, endLine = startLine): string {
+  return ` data-source-line="${startLine}" data-source-line-start="${startLine}" data-source-line-end="${endLine}"`;
+}
+
 type PreviewListItem =
   | { kind: "html"; html: string }
-  | { kind: "cols"; marker: string; cells: string[]; indentLevel: number };
+  | { kind: "cols"; marker: string; cells: string[]; indentLevel: number; sourceLine: number };
 
 function splitPreviewColumns(input: string): string[] | null {
   // 列区切りは「本物のタブ文字」だけにする。
@@ -248,19 +252,21 @@ function markdownTableAlignClass(align: MarkdownTableAlign): string {
 function renderMarkdownTable(
   headerCells: string[],
   aligns: MarkdownTableAlign[],
-  rows: string[][]
+  rows: Array<{ cells: string[]; sourceLine: number }>,
+  sourceLineStart: number
 ): string {
   const maxCols = Math.max(
     headerCells.length,
     aligns.length,
-    ...rows.map((row) => row.length)
+    ...rows.map((row) => row.cells.length)
   );
 
   const normalizedHeader = Array.from({ length: maxCols }, (_, i) => headerCells[i] ?? "");
+  const sourceLineEnd = sourceLineStart + rows.length + 1;
 
   const thead = `
     <thead>
-      <tr>
+      <tr${sourceLineAttrs(sourceLineStart)}>
         ${normalizedHeader
           .map((cell, i) => `<th class="md-table-cell${markdownTableAlignClass(aligns[i] ?? null)}">${renderInlineCode(cell)}</th>`)
           .join("")}
@@ -273,9 +279,9 @@ function renderMarkdownTable(
       <tbody>
         ${rows
           .map((row) => {
-            const normalizedRow = Array.from({ length: maxCols }, (_, i) => row[i] ?? "");
+            const normalizedRow = Array.from({ length: maxCols }, (_, i) => row.cells[i] ?? "");
             return `
-              <tr>
+              <tr${sourceLineAttrs(row.sourceLine)}>
                 ${normalizedRow
                   .map((cell, i) => `<td class="md-table-cell${markdownTableAlignClass(aligns[i] ?? null)}">${renderInlineCode(cell)}</td>`)
                   .join("")}
@@ -287,15 +293,15 @@ function renderMarkdownTable(
     `
     : "";
 
-  return `<div class="md-table-wrap"><table class="md-table">${thead}${tbody}</table></div>`;
+  return `<div class="md-table-wrap"${sourceLineAttrs(sourceLineStart, sourceLineEnd)}><table class="md-table">${thead}${tbody}</table></div>`;
 }
 
-function renderPreviewTextBlock(text: string): string {
-  return `<pre class="preview-pre">${renderInlineCode(text)}</pre>`;
+function renderPreviewTextBlock(text: string, sourceLineStart: number, sourceLineEnd: number): string {
+  return `<pre class="preview-pre"${sourceLineAttrs(sourceLineStart, sourceLineEnd)}>${renderInlineCode(text)}</pre>`;
 }
 
 function renderPreviewColumnsTable(
-  rows: Array<{ marker: string; cells: string[]; indentLevel?: number }>,
+  rows: Array<{ marker: string; cells: string[]; indentLevel?: number; sourceLine: number }>,
   mode: "ul" | "ol"
 ): string {
   if (rows.length === 0) return "";
@@ -308,7 +314,7 @@ function renderPreviewColumnsTable(
       const indentStyle = previewTableIndentStyle(row.indentLevel ?? 0);
 
       return `
-        <tr class="md-cols-row">
+        <tr class="md-cols-row"${sourceLineAttrs(row.sourceLine)}>
           <td class="md-cols-marker"${indentStyle}>${escapeHtml(row.marker)}</td>
           ${padded
             .map(
@@ -332,7 +338,7 @@ function renderPreviewList(
 
   const parts: string[] = [];
   let htmlBuf: string[] = [];
-  let colsBuf: Array<{ marker: string; cells: string[]; indentLevel: number }> = [];
+  let colsBuf: Array<{ marker: string; cells: string[]; indentLevel: number; sourceLine: number }> = [];
 
   const flushHtml = () => {
     if (htmlBuf.length === 0) return;
@@ -364,6 +370,7 @@ function renderPreviewList(
       marker: item.marker,
       cells: item.cells,
       indentLevel: item.indentLevel,
+      sourceLine: item.sourceLine,
     });
   }
 
@@ -379,6 +386,7 @@ export function renderPreviewMarkdown(text: string): string {
 
   const parts: string[] = [];
   let buf: string[] = [];
+  let bufStartLine: number | null = null;
   let listMode: "ul" | "ol" | null = null;
   let listItems: PreviewListItem[] = [];
 
@@ -386,11 +394,19 @@ export function renderPreviewMarkdown(text: string): string {
   let inFence = false;
   let fenceLang = "";
   let fenceBuf: string[] = [];
+  let fenceStartLine = 0;
+
+  const pushTextLine = (line: string, sourceLine: number) => {
+    if (buf.length === 0) bufStartLine = sourceLine;
+    buf.push(line);
+  };
 
   const flushText = () => {
     if (buf.length === 0) return;
-    parts.push(renderPreviewTextBlock(buf.join("\n")));
+    const startLine = bufStartLine ?? 0;
+    parts.push(renderPreviewTextBlock(buf.join("\n"), startLine, startLine + buf.length - 1));
     buf = [];
+    bufStartLine = null;
   };
 
   const closeList = () => {
@@ -408,11 +424,11 @@ export function renderPreviewMarkdown(text: string): string {
     listItems = [];
   };
 
-  const flushFence = () => {
+  const flushFence = (sourceLineEnd: number) => {
     const code = escapeHtml(fenceBuf.join("\n"));
     const langAttr = fenceLang ? ` data-lang="${escapeHtml(fenceLang)}"` : "";
     parts.push(
-      `<pre class="md-codeblock"${langAttr}><code class="md-code">${code}</code></pre>`
+      `<pre class="md-codeblock"${sourceLineAttrs(fenceStartLine, sourceLineEnd)}${langAttr}><code class="md-code">${code}</code></pre>`
     );
     fenceBuf = [];
     fenceLang = "";
@@ -421,12 +437,13 @@ export function renderPreviewMarkdown(text: string): string {
   const renderTodoItem = (
     content: string,
     checked: boolean,
-    indentLevel = 0
+    indentLevel: number,
+    sourceLine: number
   ) => {
     const checkedAttr = checked ? " checked" : "";
     const indentStyle = previewIndentStyle(indentLevel);
 
-    return `<li class="md-li md-li-todo"${indentStyle}><label class="md-todo"><input class="md-todo-checkbox" type="checkbox" disabled${checkedAttr}><span class="md-todo-text">${renderInlineCode(content)}</span></label></li>`;
+    return `<li class="md-li md-li-todo"${sourceLineAttrs(sourceLine)}${indentStyle}><label class="md-todo"><input class="md-todo-checkbox" type="checkbox" disabled${checkedAttr}><span class="md-todo-text">${renderInlineCode(content)}</span></label></li>`;
   };
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
@@ -441,10 +458,11 @@ export function renderPreviewMarkdown(text: string): string {
         inFence = true;
         fenceLang = (fenceMatch[1] ?? "").trim(); // ```ts みたいな言語指定は任意
         fenceBuf = [];
+        fenceStartLine = lineIndex;
       } else {
         // close fence
         inFence = false;
-        flushFence();
+        flushFence(lineIndex);
       }
       continue;
     }
@@ -459,7 +477,7 @@ export function renderPreviewMarkdown(text: string): string {
     if (/^\s*---\s*$/.test(line)) {
       closeList();
       flushText();
-      parts.push(`<hr class="md-hr">`);
+      parts.push(`<hr class="md-hr"${sourceLineAttrs(lineIndex)}>`);
       continue;
     }
 
@@ -467,10 +485,10 @@ export function renderPreviewMarkdown(text: string): string {
     if (line.trim() === "") {
       if (listMode) {
         closeList();
-        parts.push(`<div class="md-blank"></div>`);
+        parts.push(`<div class="md-blank"${sourceLineAttrs(lineIndex)}></div>`);
       } else {
-        if (buf.length === 0) parts.push(`<div class="md-blank"></div>`);
-        else buf.push("");
+        if (buf.length === 0) parts.push(`<div class="md-blank"${sourceLineAttrs(lineIndex)}></div>`);
+        else pushTextLine("", lineIndex);
       }
       continue;
     }
@@ -485,7 +503,7 @@ export function renderPreviewMarkdown(text: string): string {
           closeList();
           flushText();
           parts.push(
-            `<h${level} class="md-h${level}">${renderInlineCode(content)}</h${level}>`
+            `<h${level} class="md-h${level}"${sourceLineAttrs(lineIndex)}>${renderInlineCode(content)}</h${level}>`
           );
           continue;
         }
@@ -501,19 +519,19 @@ export function renderPreviewMarkdown(text: string): string {
       const aligns = parseMarkdownTableSeparator(lines[lineIndex + 1] ?? "");
 
       if (headerCells && aligns) {
-        const rows: string[][] = [];
+        const rows: Array<{ cells: string[]; sourceLine: number }> = [];
         let nextIndex = lineIndex + 2;
 
         while (nextIndex < lines.length) {
           const rowCells = splitMarkdownTableRow(lines[nextIndex] ?? "");
           if (!rowCells) break;
-          rows.push(rowCells);
+          rows.push({ cells: rowCells, sourceLine: nextIndex });
           nextIndex++;
         }
 
         closeList();
         flushText();
-        parts.push(renderMarkdownTable(headerCells, aligns, rows));
+        parts.push(renderMarkdownTable(headerCells, aligns, rows, lineIndex));
         lineIndex = nextIndex - 1;
         continue;
       }
@@ -531,7 +549,7 @@ export function renderPreviewMarkdown(text: string): string {
           openList("ul");
           listItems.push({
             kind: "html",
-            html: renderTodoItem(content, checked, indentLevel),
+            html: renderTodoItem(content, checked, indentLevel, lineIndex),
           });
           continue;
         }
@@ -555,11 +573,12 @@ export function renderPreviewMarkdown(text: string): string {
               marker: "•",
               cells,
               indentLevel,
+              sourceLine: lineIndex,
             });
           } else {
             listItems.push({
               kind: "html",
-              html: `<li class="md-li"${previewIndentStyle(indentLevel)}>${renderInlineCode(content)}</li>`,
+              html: `<li class="md-li"${sourceLineAttrs(lineIndex)}${previewIndentStyle(indentLevel)}>${renderInlineCode(content)}</li>`,
             });
           }
 
@@ -587,11 +606,12 @@ export function renderPreviewMarkdown(text: string): string {
               marker,
               cells,
               indentLevel,
+              sourceLine: lineIndex,
             });
           } else {
             listItems.push({
               kind: "html",
-              html: `<li class="md-li" value="${value}"${previewIndentStyle(indentLevel)}>${renderInlineCode(content)}</li>`,
+              html: `<li class="md-li" value="${value}"${sourceLineAttrs(lineIndex)}${previewIndentStyle(indentLevel)}>${renderInlineCode(content)}</li>`,
             });
           }
 
@@ -602,13 +622,13 @@ export function renderPreviewMarkdown(text: string): string {
 
     // normal text
     if (listMode) closeList();
-    buf.push(line);
+    pushTextLine(line, lineIndex);
   }
 
     // EOF: fence が閉じられていない場合も一応表示
     if (inFence) {
         inFence = false;
-        flushFence();
+        flushFence(lines.length - 1);
     }
 
     closeList();
