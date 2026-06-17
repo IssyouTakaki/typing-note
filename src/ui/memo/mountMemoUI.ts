@@ -2565,6 +2565,30 @@ const textareaEditing = registerTextareaEditing(input, {
   isEditorActive: () => state.view === "editor",
 });
 
+const sanitizeMemoClipboardText = (text: string) =>
+  text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u200B\u200C\u200D\uFEFF]/g, "");
+
+input.addEventListener("copy", (e) => {
+  if (state.view !== "editor") return;
+  if (!e.clipboardData) return;
+
+  const selectionStart = input.selectionStart ?? 0;
+  const selectionEnd = input.selectionEnd ?? selectionStart;
+  if (selectionStart === selectionEnd) return;
+
+  const selectedText = input.value.slice(selectionStart, selectionEnd);
+  const sanitizedText = sanitizeMemoClipboardText(selectedText);
+  const needsCustomCopy =
+    selectedText.includes("\n") || sanitizedText !== selectedText;
+
+  if (!needsCustomCopy) return;
+
+  e.clipboardData.setData("text/plain", sanitizedText);
+  e.preventDefault();
+});
+
   // ---- renderers
   function renderEditor() {
     const tab = activeTab();
