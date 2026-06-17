@@ -967,6 +967,8 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
   const clampSelectionPosition = (value: string, position: number) =>
     Math.max(0, Math.min(value.length, position));
 
+  const PREVIEW_CARET_ANCHOR_LINE = 4;
+
   const saveActiveMemoViewport = () => {
     if (state.view !== "editor") return;
 
@@ -1095,27 +1097,43 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     return true;
   };
   
-  const syncPreviewToCaret = () => {
-    const text = input.value;
-    const maxScroll = Math.max(0, preview.scrollHeight - preview.clientHeight);
-    if (maxScroll <= 0) return;
-  
-    const caret = Math.max(0, input.selectionStart ?? 0);
-    const before = text.slice(0, caret);
-    const beforeLines = before.split(/\r?\n/).length - 1;
-    const totalLines = text.split(/\r?\n/).length - 1;
-  
-    let ratio = 0;
-    if (totalLines > 0) {
-      ratio = beforeLines / totalLines;
-    } else if (text.length > 0) {
-      ratio = caret / text.length;
-    }
-  
-    preview.scrollTop = Math.max(0, Math.min(maxScroll, maxScroll * ratio));
+  type PreviewLineAnchor = {
+    element: HTMLElement;
+    lineOffsetPx: number;
   };
 
-  const scrollPreviewToTextPosition = (position: number) => {
+  const getPreviewLineHeight = (element: HTMLElement) => {
+    return (
+      Number.parseFloat(window.getComputedStyle(element).lineHeight) ||
+      Number.parseFloat(window.getComputedStyle(input).lineHeight) ||
+      22
+    );
+  };
+
+  const findPreviewLineAnchor = (lineNo: number): PreviewLineAnchor | null => {
+    const exact = preview.querySelector<HTMLElement>(`[data-source-line="${lineNo}"]`);
+    if (exact) return { element: exact, lineOffsetPx: 0 };
+
+    const ranged = Array.from(
+      preview.querySelectorAll<HTMLElement>("[data-source-line-start][data-source-line-end]")
+    );
+
+    for (const element of ranged) {
+      const start = Number.parseInt(element.dataset.sourceLineStart ?? "", 10);
+      const end = Number.parseInt(element.dataset.sourceLineEnd ?? "", 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+      if (lineNo < start || lineNo > end) continue;
+
+      return {
+        element,
+        lineOffsetPx: Math.max(0, lineNo - start) * getPreviewLineHeight(element),
+      };
+    }
+
+    return null;
+  };
+
+  const scrollPreviewToTextPositionByRatio = (position: number) => {
     const text = input.value;
     const maxScroll = Math.max(0, preview.scrollHeight - preview.clientHeight);
     if (maxScroll <= 0) return;
@@ -1133,6 +1151,35 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     }
 
     preview.scrollTop = Math.max(0, Math.min(maxScroll, maxScroll * ratio));
+  };
+
+  const scrollPreviewToTextPosition = (position: number) => {
+    const text = input.value;
+    const maxScroll = Math.max(0, preview.scrollHeight - preview.clientHeight);
+    if (maxScroll <= 0) return;
+
+    const pos = clampSelectionPosition(text, position);
+    const lineStart = getLineStartIndex(text, pos);
+    const lineNo = text.slice(0, lineStart).split(/\r?\n/).length - 1;
+    const anchor = findPreviewLineAnchor(lineNo);
+
+    if (!anchor) {
+      scrollPreviewToTextPositionByRatio(pos);
+      return;
+    }
+
+    const previewRect = preview.getBoundingClientRect();
+    const anchorRect = anchor.element.getBoundingClientRect();
+    const fixedLineOffset =
+      getPreviewLineHeight(anchor.element) * Math.max(0, PREVIEW_CARET_ANCHOR_LINE - 1);
+    const targetTop =
+      preview.scrollTop + anchorRect.top - previewRect.top + anchor.lineOffsetPx - fixedLineOffset;
+
+    preview.scrollTop = Math.max(0, Math.min(maxScroll, targetTop));
+  };
+
+  const syncPreviewToCaret = () => {
+    scrollPreviewToTextPosition(input.selectionStart ?? 0);
   };
 
   const scrollInputToTextPosition = (position: number) => {
