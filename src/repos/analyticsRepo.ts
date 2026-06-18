@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabaseClient";
+import { trackPostHogEvent } from "./posthogAnalyticsRepo";
 
 export type AppEventName =
   | "memo_saved"
@@ -202,16 +203,30 @@ async function insertEvent<Name extends AppEventName>(
   const { data, error: sessionError } = await supabase.auth.getSession();
   if (sessionError) throw sessionError;
 
+  const userId = data.session?.user.id ?? null;
+  const anonymousId = getAnonymousId();
+  const sessionId = getSessionId();
+  const pagePath = getPagePath();
+  const cleanMetadata = sanitizeMetadata(eventName, metadata);
+
   const { error } = await supabase.from("app_events").insert({
-    user_id: data.session?.user.id ?? null,
-    anonymous_id: getAnonymousId(),
-    session_id: getSessionId(),
+    user_id: userId,
+    anonymous_id: anonymousId,
+    session_id: sessionId,
     event_name: eventName,
-    metadata: sanitizeMetadata(eventName, metadata),
-    page_path: getPagePath(),
+    metadata: cleanMetadata,
+    page_path: pagePath,
   });
 
   if (error) throw error;
+
+  trackPostHogEvent({
+    eventName,
+    metadata: cleanMetadata,
+    anonymousId,
+    userId,
+    pagePath,
+  });
 }
 
 export function trackEvent<Name extends AppEventName>(
