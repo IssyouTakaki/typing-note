@@ -9,6 +9,7 @@ import {
   consumeForceSignedOutScreen,
   getAppScreen,
   getAuthMode,
+  mountAdminAnalyticsUI,
   mountAuthUI,
   mountAccountSettingsUI,
   mountForgotPasswordUI,
@@ -74,6 +75,11 @@ async function rerender(message = "") {
     return;
   }
 
+  if (getAppScreen() === "adminAnalytics") {
+    mountAdminAnalyticsUI(app, message);
+    return;
+  }
+
   mountMemoUI(app, { rerender: () => rerender() });
 }
 
@@ -97,7 +103,7 @@ async function syncI18nFromSession(sessionOverride?: any) {
 }
 
 function shouldKeepCurrentScreenOnSignedIn() {
-  return getAppScreen() === "accountSettings";
+  return getAppScreen() === "accountSettings" || getAppScreen() === "adminAnalytics";
 }
 
 export async function mountApp() {

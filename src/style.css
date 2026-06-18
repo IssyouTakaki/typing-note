@@ -1074,6 +1074,132 @@ body {
   background: #fbfbfc;
 }
 
+/* --- Admin analytics --- */
+.admin-analytics-card{
+  width: min(820px, 94vw);
+}
+
+.admin-analytics-section{
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #eef1f4;
+}
+
+.admin-analytics-grid{
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-analytics-grid-compact{
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.admin-analytics-metric{
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e3e6ea;
+  border-radius: 10px;
+  background: #fbfbfc;
+}
+
+.admin-analytics-metric-value{
+  font-size: 20px;
+  font-weight: 800;
+  color: #111;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.admin-analytics-metric-label{
+  margin-top: 4px;
+  font-size: 12px;
+  color: #555;
+  line-height: 1.35;
+}
+
+.admin-analytics-metric-detail{
+  margin-top: 6px;
+  font-size: 11px;
+  color: #777;
+  line-height: 1.35;
+}
+
+.admin-analytics-windows{
+  display: grid;
+  gap: 12px;
+}
+
+.admin-analytics-window{
+  padding: 12px;
+  border: 1px solid #e3e6ea;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.admin-analytics-window-header{
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-analytics-window-title{
+  font-size: 13px;
+  font-weight: 800;
+  color: #111;
+}
+
+.admin-analytics-window-since{
+  font-size: 11px;
+  color: #666;
+  text-align: right;
+}
+
+.admin-analytics-table{
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.admin-analytics-table th,
+.admin-analytics-table td{
+  padding: 7px 0;
+  border-top: 1px solid #eef1f4;
+}
+
+.admin-analytics-table th{
+  color: #333;
+  font-weight: 600;
+  text-align: left;
+}
+
+.admin-analytics-table td{
+  color: #111;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Noto Sans Mono CJK JP", "Noto Sans Mono", monospace;
+  font-weight: 700;
+  text-align: right;
+}
+
+@media (max-width: 760px){
+  .admin-analytics-grid,
+  .admin-analytics-grid-compact{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-analytics-window-header{
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-analytics-window-since{
+    text-align: left;
+  }
+}
+
 .btn{
   padding: 8px 12px;
   border: 1px solid #d0d7de;
