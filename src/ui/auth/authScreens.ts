@@ -102,6 +102,70 @@ import { qs } from "../../utils/dom";
     );
   }
 
+  function keyConfirmAccount(
+    message: string,
+    hintText = t("confirmHintProceedCancel")
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      const previousActive = document.activeElement;
+      const overlay = document.createElement("div");
+      overlay.className = "key-confirm-overlay";
+
+      const card = document.createElement("div");
+      card.className = "key-confirm";
+      card.setAttribute("role", "dialog");
+      card.setAttribute("aria-modal", "true");
+      card.tabIndex = -1;
+
+      const title = document.createElement("div");
+      title.className = "key-confirm-title";
+      title.textContent = t("confirmTitle");
+
+      const body = document.createElement("div");
+      body.className = "key-confirm-body";
+      body.textContent = message;
+
+      const hint = document.createElement("div");
+      hint.className = "key-confirm-hint";
+      hint.textContent = hintText;
+
+      card.append(title, body, hint);
+      overlay.append(card);
+      document.body.append(overlay);
+      card.focus({ preventScroll: true });
+
+      const cleanup = () => {
+        window.removeEventListener("keydown", onKeyDown, true);
+        overlay.remove();
+        if (previousActive instanceof HTMLElement) {
+          previousActive.focus({ preventScroll: true });
+        }
+      };
+
+      const finish = (result: boolean) => {
+        cleanup();
+        resolve(result);
+      };
+
+      function onKeyDown(event: KeyboardEvent) {
+        if (event.isComposing) return;
+        const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+        if (key !== "y" && key !== "n" && key !== "escape") return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        finish(key === "y");
+      }
+
+      window.addEventListener("keydown", onKeyDown, true);
+
+      overlay.addEventListener("click", (event) => {
+        if (event.target !== overlay) return;
+        finish(false);
+      });
+    });
+  }
+
   function buildPasswordResetRedirectTo() {
     const url = new URL(window.location.href);
     const { resolvedLocale } = getI18nState();
@@ -1328,7 +1392,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     setText("#newAccountPasswordConfirmLabel", t("newPasswordConfirm"));
     changePasswordBtn.textContent = t("accountChangePassword");
     saveBtn.textContent = t("saveSettings");
-    adminAnalyticsBtn.textContent = "Admin";
+    adminAnalyticsBtn.textContent = t("adminAnalyticsButton");
     backBtn.textContent = t("backToTypingNote");
 
     const current = getI18nState();
@@ -1497,7 +1561,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
           return;
         }
 
-        const ok = window.confirm(
+        const ok = await keyConfirmAccount(
           formatI18n(t("accountConfirmSendLoginEmailCode"), {
             email: accountEmailLabel,
           })
@@ -1558,10 +1622,11 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         return;
       }
     
-      const ok = window.confirm(
+      const ok = await keyConfirmAccount(
         formatI18n(t("accountDeleteSecurityEmailConfirm"), {
           email: accountEmailLabel,
-        })
+        }),
+        t("confirmHintDeleteCancel")
       );
     
       if (!ok) return;
@@ -1825,7 +1890,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         return;
       }
 
-      const ok = window.confirm(
+      const ok = await keyConfirmAccount(
         t("accountConfirmChangeLoginEmail")
       );
 
@@ -1900,7 +1965,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         return;
       }
 
-      const ok = window.confirm(
+      const ok = await keyConfirmAccount(
         t("accountConfirmChangePassword")
       );
 
@@ -1981,37 +2046,49 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     });
   }
 
-  const ADMIN_EVENT_LABELS: Record<AdminAnalyticsEventName, string> = {
-    memo_saved: "Memo saved",
-    memo_created: "Memo created",
-    memo_updated: "Memo updated",
-    explorer_opened: "Explorer opened",
-    dust_opened: "Dust opened",
-    search_used: "Search used",
-    feedback_sent: "Feedback sent",
-    auth_signin_succeeded: "Sign-in succeeded",
-  };
+  const ADMIN_EVENT_LABEL_KEYS = {
+    memo_saved: "adminEventMemoSaved",
+    memo_created: "adminEventMemoCreated",
+    memo_updated: "adminEventMemoUpdated",
+    explorer_opened: "adminEventExplorerOpened",
+    dust_opened: "adminEventDustOpened",
+    search_used: "adminEventSearchUsed",
+    feedback_sent: "adminEventFeedbackSent",
+    auth_signin_succeeded: "adminEventSignInSucceeded",
+  } as const;
 
   const ADMIN_EVENT_ORDER = Object.keys(
-    ADMIN_EVENT_LABELS
+    ADMIN_EVENT_LABEL_KEYS
   ) as AdminAnalyticsEventName[];
 
   function formatAdminCount(value: number | null | undefined) {
-    if (typeof value !== "number" || !Number.isFinite(value)) return "N/A";
-    return new Intl.NumberFormat().format(value);
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return t("adminNotAvailable");
+    }
+
+    const locale = getI18nState().resolvedLocale === "ja" ? "ja-JP" : "en-US";
+    return new Intl.NumberFormat(locale).format(value);
   }
 
   function formatAdminDateTime(iso: string) {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return iso;
 
-    return new Intl.DateTimeFormat(undefined, {
+    const locale = getI18nState().resolvedLocale === "ja" ? "ja-JP" : "en-US";
+    return new Intl.DateTimeFormat(locale, {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
     }).format(date);
+  }
+
+  function getAdminWindowLabel(windowSummary: AdminAnalyticsWindow) {
+    if (windowSummary.key === "today") return t("adminToday");
+    if (windowSummary.key === "last7d") return t("adminLast7Days");
+    if (windowSummary.key === "last30d") return t("adminLast30Days");
+    return windowSummary.label;
   }
 
   function appendAdminMetric(
@@ -2052,35 +2129,41 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
     const title = document.createElement("div");
     title.className = "admin-analytics-window-title";
-    title.textContent = windowSummary.label;
+    title.textContent = getAdminWindowLabel(windowSummary);
 
     const since = document.createElement("div");
     since.className = "admin-analytics-window-since";
-    since.textContent = `Since ${formatAdminDateTime(windowSummary.since)}`;
+    since.textContent = formatI18n(t("adminSince"), {
+      date: formatAdminDateTime(windowSummary.since),
+    });
 
     header.append(title, since);
 
     const metrics = document.createElement("div");
     metrics.className = "admin-analytics-grid admin-analytics-grid-compact";
-    appendAdminMetric(metrics, "Events", formatAdminCount(windowSummary.totalEvents));
     appendAdminMetric(
       metrics,
-      "Anonymous events",
+      t("adminMetricEvents"),
+      formatAdminCount(windowSummary.totalEvents)
+    );
+    appendAdminMetric(
+      metrics,
+      t("adminMetricAnonymousEvents"),
       formatAdminCount(windowSummary.anonymousEvents)
     );
     appendAdminMetric(
       metrics,
-      "Signed-in events",
+      t("adminMetricSignedInEvents"),
       formatAdminCount(windowSummary.authenticatedEvents)
     );
     appendAdminMetric(
       metrics,
-      "Anonymous visitors",
+      t("adminMetricAnonymousVisitors"),
       formatAdminCount(windowSummary.uniqueAnonymousVisitors)
     );
     appendAdminMetric(
       metrics,
-      "Signed-in users",
+      t("adminMetricSignedInUsers"),
       formatAdminCount(windowSummary.uniqueAuthenticatedUsers)
     );
 
@@ -2093,7 +2176,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
       const nameCell = document.createElement("th");
       nameCell.scope = "row";
-      nameCell.textContent = ADMIN_EVENT_LABELS[eventName];
+      nameCell.textContent = t(ADMIN_EVENT_LABEL_KEYS[eventName]);
 
       const countCell = document.createElement("td");
       countCell.textContent = formatAdminCount(windowSummary.eventCounts[eventName] ?? 0);
@@ -2118,24 +2201,26 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
     appendAdminMetric(
       totalsEl,
-      "Registered users",
+      t("adminMetricRegisteredUsers"),
       formatAdminCount(summary.totals.registeredUsers)
     );
     appendAdminMetric(
       totalsEl,
-      "Active memos",
+      t("adminMetricActiveMemos"),
       formatAdminCount(summary.totals.activeMemos)
     );
     appendAdminMetric(
       totalsEl,
-      "Dust memos",
+      t("adminMetricDustMemos"),
       formatAdminCount(summary.totals.trashedMemos)
     );
     appendAdminMetric(
       totalsEl,
-      "Feedback, last 30 days",
+      t("adminMetricFeedbackLast30Days"),
       formatAdminCount(summary.totals.feedbackSubmissionsLast30d),
-      `Generated ${formatAdminDateTime(summary.generatedAt)}`
+      formatI18n(t("adminGenerated"), {
+        date: formatAdminDateTime(summary.generatedAt),
+      })
     );
 
     for (const windowSummary of summary.windows) {
@@ -2144,9 +2229,9 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
     noteEl.hidden = !summary.notes.recentEventRowsTruncated;
     noteEl.textContent = summary.notes.recentEventRowsTruncated
-      ? `Recent event rows were capped at ${formatAdminCount(
-          summary.notes.recentEventRowsLimit
-        )}.`
+      ? formatI18n(t("adminRecentRowsCapped"), {
+          count: formatAdminCount(summary.notes.recentEventRowsLimit),
+        })
       : "";
   }
 
@@ -2160,6 +2245,13 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const noteEl = qs<HTMLDivElement>("#adminAnalyticsNote");
     const refreshBtn = qs<HTMLButtonElement>("#adminAnalyticsRefreshBtn");
     const backBtn = qs<HTMLButtonElement>("#adminAnalyticsBackBtn");
+
+    setText("#adminAnalyticsTitle", t("adminAnalytics"));
+    setText("#adminAnalyticsHelp", t("adminAnalyticsHelp"));
+    setText("#adminAnalyticsTotalsTitle", t("adminTotals"));
+    setText("#adminAnalyticsEventsTitle", t("adminEvents"));
+    refreshBtn.textContent = t("adminRefresh");
+    backBtn.textContent = t("adminBackToAccountSettings");
 
     let busy = false;
 
@@ -2184,7 +2276,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const loadSummary = async () => {
       try {
         setBusy(true);
-        setMsg("Loading admin analytics...", "info");
+        setMsg(t("adminLoading"), "info");
 
         const summary = await getAdminAnalyticsSummary();
         renderAdminSummary(totalsEl, windowsEl, noteEl, summary);
@@ -2195,7 +2287,12 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         windowsEl.innerHTML = "";
         noteEl.hidden = true;
         noteEl.textContent = "";
-        setMsg(formatAdminAnalyticsError(error), "error");
+        setMsg(
+          getI18nState().resolvedLocale === "ja"
+            ? t("adminLoadFailed")
+            : formatAdminAnalyticsError(error),
+          "error"
+        );
       } finally {
         setBusy(false);
       }
