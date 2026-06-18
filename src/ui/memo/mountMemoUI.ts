@@ -38,6 +38,7 @@ import { escapeHtml } from "../../utils/html";
 import { qs } from "../../utils/dom";
 import { t } from "../../i18n/i18n";
 import { submitFeedback } from "../../repos/feedbackRepo";
+import { trackEvent } from "../../repos/analyticsRepo";
 import {
   getAppScreen,
   openAccountScreen,
@@ -607,11 +608,15 @@ async function autoUpdateIfEditingCurrentMemo(): Promise<AutoUpdateResult> {
   await updateMemo ({userId, id: tab.currentMemoId, content: tab.text});
   tab.dirty = false;
   renderTabsHandler?.();
+  trackEvent("memo_updated", { trigger: "auto_update" });
+  trackEvent("memo_saved", { result: "updated", trigger: "auto_update" });
   return "updated";
 }
 
 
-async function saveIfDirty(): Promise<SaveResult> {
+async function saveIfDirty(
+  trigger: "shortcut" | "auto_update" = "shortcut"
+): Promise<SaveResult> {
 
   const tab = activeTab();
   if (!tab.dirty) return "noop";
@@ -627,6 +632,7 @@ async function saveIfDirty(): Promise<SaveResult> {
     if (goSignup) {
       openAccountScreen("signup");
     }
+    trackEvent("memo_saved", { result: "auth_required", trigger });
     return "auth_required";
   }
 
@@ -634,6 +640,8 @@ async function saveIfDirty(): Promise<SaveResult> {
     await updateMemo({userId, id: tab.currentMemoId, content: tab.text});
     tab.dirty = false;
     renderTabsHandler?.();
+    trackEvent("memo_updated", { trigger });
+    trackEvent("memo_saved", { result: "updated", trigger });
     return "updated";
   } else {
 
@@ -641,6 +649,8 @@ async function saveIfDirty(): Promise<SaveResult> {
     tab.currentMemoId = created.id;
     tab.dirty = false;
     renderTabsHandler?.();
+    trackEvent("memo_created", { trigger });
+    trackEvent("memo_saved", { result: "created", trigger });
     return "created";
   }
 }
@@ -856,7 +866,7 @@ function registerSaveShortcut() {
     e.preventDefault();
   
     try {
-      const result = await saveIfDirty();
+      const result = await saveIfDirty("shortcut");
 
       if (result === "updated") showMessage("Updated ✨");
       else if (result === "created") showMessage("Created a new memo 🚀");
@@ -1935,6 +1945,10 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
           environment: environmentCheck.checked ? environment : undefined,
         });
 
+        trackEvent("feedback_sent", {
+          included_selection: !!optionalSelection,
+          included_environment: environmentCheck.checked,
+        });
         closeFeedbackDialog(true);
         showMessage("Feedback sent. Thank you.");
       } catch (error) {
@@ -2238,7 +2252,7 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
   
     let saveResult: SaveResult = "noop";
     try {
-      saveResult = await saveIfDirty(); // 未保存なら保存してから切替
+      saveResult = await saveIfDirty("auto_update"); // 未保存なら保存してから切替
     } catch (err) {
       console.error("save failed before switching tab", err);
       showMessage("Oops — save failed 😵‍💫", 2500);
@@ -2278,7 +2292,7 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
 
     let saveResult: SaveResult = "noop";
     try {
-      saveResult = await saveIfDirty(); // 未保存なら保存してから切替
+      saveResult = await saveIfDirty("auto_update"); // 未保存なら保存してから切替
     } catch (err) {
       console.error("save failed before switching relative tab", err);
       showMessage("Oops — save failed 😵‍💫", 2500);
@@ -2540,6 +2554,12 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
       searchInputExists: !!searchInput,
       searchInputHidden: searchInput.hidden,
       searchInputDisabled: searchInput.disabled,
+    });
+
+    trackEvent("search_used", {
+      surface:
+        state.view === "explorer" || state.view === "dust" ? state.view : "editor",
+      trigger: "shortcut",
     });
 
     if (state.view === "explorer" || state.view === "dust") {
@@ -3191,8 +3211,20 @@ input.addEventListener("copy", (e) => {
 
 
   // ---- wire search (Explorer & Dust)
+  let searchInputHadText = false;
   searchInput.addEventListener("input", () => {
     const v = searchInput.value;
+    const hasSearchText = v.trim().length > 0;
+
+    if (
+      hasSearchText &&
+      !searchInputHadText &&
+      (state.view === "explorer" || state.view === "dust")
+    ) {
+      trackEvent("search_used", { surface: state.view, trigger: "input" });
+    }
+
+    searchInputHadText = hasSearchText;
 
     if (state.view === "explorer") {
       explorerQuery = v;
@@ -3380,6 +3412,10 @@ input.addEventListener("copy", (e) => {
   async function openExplorerTabByShortcut() {
     const session = await getSession();
     if (!session) {
+      trackEvent("explorer_opened", {
+        result: "auth_required",
+        trigger: "shortcut_tab",
+      });
       showMessage(t("msgExplorerRequiresSignIn"), 4500);
       openAccountScreen("signin");
       return;
@@ -3388,6 +3424,10 @@ input.addEventListener("copy", (e) => {
     const r = await autoUpdateIfEditingCurrentMemo();
 
     if (await activateSpecialTabIfAlreadyOpen("explorer")) {
+      trackEvent("explorer_opened", {
+        result: "activated",
+        trigger: "shortcut_tab",
+      });
       showMessage(r === "updated" ? "Updated ✨ — Explorer tab activated" : "Explorer tab activated");
       return;
     }
@@ -3396,12 +3436,21 @@ input.addEventListener("copy", (e) => {
     const opened = await createSpecialTab("explorer", returnToTabId);
     if (!opened) return;
 
+    trackEvent("explorer_opened", {
+      result: "opened",
+      trigger: "shortcut_tab",
+    });
+
     showMessage(r === "updated" ? "Updated ✨ — Explorer tab opened" : "Explorer tab opened");
   }
   
   async function openDustTabByShortcut() {
     const session = await getSession();
     if (!session) {
+      trackEvent("dust_opened", {
+        result: "auth_required",
+        trigger: "shortcut_tab",
+      });
       showMessage(t("msgDustRequiresSignIn"), 4500);
       openAccountScreen("signin");
       return;
@@ -3410,6 +3459,10 @@ input.addEventListener("copy", (e) => {
     const r = await autoUpdateIfEditingCurrentMemo();
 
     if (await activateSpecialTabIfAlreadyOpen("dust")) {
+      trackEvent("dust_opened", {
+        result: "activated",
+        trigger: "shortcut_tab",
+      });
       showMessage(r === "updated" ? "Updated ✨ — Dust tab activated" : "Dust tab activated");
       return;
     }
@@ -3418,12 +3471,21 @@ input.addEventListener("copy", (e) => {
     const opened = await createSpecialTab("dust", returnToTabId);
     if (!opened) return;
 
+    trackEvent("dust_opened", {
+      result: "opened",
+      trigger: "shortcut_tab",
+    });
+
     showMessage(r === "updated" ? "Updated ✨ — Dust tab opened" : "Dust tab opened");
   }
 
   async function goExplorer() {
     const session = await getSession();
     if (!session) {
+      trackEvent("explorer_opened", {
+        result: "auth_required",
+        trigger: "button",
+      });
       showMessage(t("msgExplorerRequiresSignIn"), 4500);
       openAccountScreen("signin");
       return;
@@ -3432,6 +3494,7 @@ input.addEventListener("copy", (e) => {
     const r = await autoUpdateIfEditingCurrentMemo();
   
     setView("explorer");
+    trackEvent("explorer_opened", { result: "opened", trigger: "button" });
     showMessage(r === "updated" ? "Updated ✨ — Explorer opened" : "Explorer opened");
   
     await loadExplorer();
@@ -3440,6 +3503,10 @@ input.addEventListener("copy", (e) => {
   async function goDust() {
     const session = await getSession();
     if (!session) {
+      trackEvent("dust_opened", {
+        result: "auth_required",
+        trigger: "button",
+      });
       showMessage(t("msgDustRequiresSignIn"), 4500);
       openAccountScreen("signin");
       return;
@@ -3447,6 +3514,7 @@ input.addEventListener("copy", (e) => {
 
     const r = await autoUpdateIfEditingCurrentMemo();
     setView("dust");
+    trackEvent("dust_opened", { result: "opened", trigger: "button" });
     showMessage(r === "updated" ? "Updated ✨ — Dust opened" : "Dust opened");
     await loadDust();
   }

@@ -22,6 +22,7 @@ import {
   type PendingSignUpDraft,
 } from "../../repos/authRepo";
 import { supabase } from "../../lib/supabaseClient";
+import { trackEvent } from "../../repos/analyticsRepo";
 import { applyI18nProfile, getI18nState, t } from "../../i18n/i18n";
 import {
   normalizeLocalePreference,
@@ -1048,6 +1049,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
           return;
         }
   
+        trackEvent("auth_signin_succeeded", { trigger: "password" });
         clearPasswordResetEmail();
         setMsg("");
         
