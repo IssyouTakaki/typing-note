@@ -1,17 +1,17 @@
 <div class="layout auth-layout">
   <div class="auth-card admin-analytics-card">
-    <div class="auth-title">Admin</div>
-    <div class="auth-help">TypingNote analytics summary</div>
+    <div id="adminAnalyticsTitle" class="auth-title">管理</div>
+    <div id="adminAnalyticsHelp" class="auth-help">TypingNote 分析サマリー</div>
 
     <div id="adminAnalyticsMsg" class="auth-msg" hidden></div>
 
     <section class="admin-analytics-section">
-      <div class="account-section-title">Totals</div>
+      <div id="adminAnalyticsTotalsTitle" class="account-section-title">合計</div>
       <div id="adminAnalyticsTotals" class="admin-analytics-grid"></div>
     </section>
 
     <section class="admin-analytics-section">
-      <div class="account-section-title">Events</div>
+      <div id="adminAnalyticsEventsTitle" class="account-section-title">イベント</div>
       <div id="adminAnalyticsWindows" class="admin-analytics-windows"></div>
     </section>
 
@@ -19,10 +19,10 @@
 
     <div class="auth-actions auth-actions-stack-mobile">
       <button id="adminAnalyticsRefreshBtn" class="auth-btn auth-btn-primary" type="button">
-        Refresh
+        更新
       </button>
       <button id="adminAnalyticsBackBtn" class="auth-btn auth-btn-secondary" type="button">
-        Back to Account settings
+        アカウント設定に戻る
       </button>
     </div>
   </div>
