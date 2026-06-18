@@ -23,6 +23,14 @@ import {
 } from "../../repos/authRepo";
 import { supabase } from "../../lib/supabaseClient";
 import { trackEvent } from "../../repos/analyticsRepo";
+import {
+  formatAdminAnalyticsError,
+  getAdminAnalyticsSummary,
+  isAdminAnalyticsAvailable,
+  type AdminAnalyticsEventName,
+  type AdminAnalyticsSummary,
+  type AdminAnalyticsWindow,
+} from "../../repos/adminAnalyticsRepo";
 import { applyI18nProfile, getI18nState, t } from "../../i18n/i18n";
 import {
   normalizeLocalePreference,
@@ -41,6 +49,7 @@ import { qs } from "../../utils/dom";
   import privacyEnHtml from "../../templates/privacy.en.html?raw";
   import forgotPasswordUIHtml from "../../templates/forgotPasswordUI.html?raw";
   import accountSettingsUIHtml from "../../templates/accountSettingsUI.html?raw";
+  import adminAnalyticsUIHtml from "../../templates/adminAnalyticsUI.html?raw";
   
   type Rerender = (message?: string) => Promise<void>;
   
@@ -307,7 +316,8 @@ import { qs } from "../../utils/dom";
   | "forgotPassword"
   | "terms"
   | "privacy"
-  | "accountSettings" = "memo";
+  | "accountSettings"
+  | "adminAnalytics" = "memo";
   
   let legalBackScreen:
   | "memo"
@@ -376,6 +386,15 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
   ) {
     authFlashKind = kind;
     appScreen = "accountSettings";
+    rerender(message).catch(console.error);
+  }
+
+  export function openAdminAnalyticsScreen(
+    message = "",
+    kind: "info" | "error" = "info"
+  ) {
+    authFlashKind = kind;
+    appScreen = "adminAnalytics";
     rerender(message).catch(console.error);
   }
 
@@ -1220,6 +1239,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const msgEl = qs<HTMLDivElement>("#accountSettingsMsg");
     const selectEl = qs<HTMLSelectElement>("#localePreferenceSelect");
     const saveBtn = qs<HTMLButtonElement>("#accountSettingsSaveBtn");
+    const adminAnalyticsBtn = qs<HTMLButtonElement>("#adminAnalyticsBtn");
     const backBtn = qs<HTMLButtonElement>("#accountSettingsBackBtn");
 
     const currentLoginEmailEl = qs<HTMLDivElement>("#currentLoginEmail");
@@ -1308,6 +1328,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     setText("#newAccountPasswordConfirmLabel", t("newPasswordConfirm"));
     changePasswordBtn.textContent = t("accountChangePassword");
     saveBtn.textContent = t("saveSettings");
+    adminAnalyticsBtn.textContent = "Admin";
     backBtn.textContent = t("backToTypingNote");
 
     const current = getI18nState();
@@ -1593,11 +1614,21 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       setMsg(t("accountReadingSecurityEmailsFailed"), "error");
     });
 
+    void isAdminAnalyticsAvailable()
+      .then((available) => {
+        adminAnalyticsBtn.hidden = !available;
+      })
+      .catch((error) => {
+        console.warn("[admin] failed to check admin analytics access", error);
+        adminAnalyticsBtn.hidden = true;
+      });
+
     let busy = false;
     const setBusy = (value: boolean) => {
       busy = value;
       selectEl.disabled = value;
       saveBtn.disabled = value;
+      adminAnalyticsBtn.disabled = value;
       backBtn.disabled = value;
       addAccountEmailInput.disabled = value;
       sendAccountEmailOtpBtn.disabled = value;
@@ -1943,6 +1974,247 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       appScreen = "memo";
       await rerender();
     });
+
+    adminAnalyticsBtn.addEventListener("click", () => {
+      if (busy) return;
+      openAdminAnalyticsScreen();
+    });
+  }
+
+  const ADMIN_EVENT_LABELS: Record<AdminAnalyticsEventName, string> = {
+    memo_saved: "Memo saved",
+    memo_created: "Memo created",
+    memo_updated: "Memo updated",
+    explorer_opened: "Explorer opened",
+    dust_opened: "Dust opened",
+    search_used: "Search used",
+    feedback_sent: "Feedback sent",
+    auth_signin_succeeded: "Sign-in succeeded",
+  };
+
+  const ADMIN_EVENT_ORDER = Object.keys(
+    ADMIN_EVENT_LABELS
+  ) as AdminAnalyticsEventName[];
+
+  function formatAdminCount(value: number | null | undefined) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "N/A";
+    return new Intl.NumberFormat().format(value);
+  }
+
+  function formatAdminDateTime(iso: string) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+
+    return new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function appendAdminMetric(
+    parent: HTMLElement,
+    label: string,
+    value: string,
+    detail = ""
+  ) {
+    const item = document.createElement("div");
+    item.className = "admin-analytics-metric";
+
+    const valueEl = document.createElement("div");
+    valueEl.className = "admin-analytics-metric-value";
+    valueEl.textContent = value;
+
+    const labelEl = document.createElement("div");
+    labelEl.className = "admin-analytics-metric-label";
+    labelEl.textContent = label;
+
+    item.append(valueEl, labelEl);
+
+    if (detail) {
+      const detailEl = document.createElement("div");
+      detailEl.className = "admin-analytics-metric-detail";
+      detailEl.textContent = detail;
+      item.append(detailEl);
+    }
+
+    parent.append(item);
+  }
+
+  function renderAdminWindow(parent: HTMLElement, windowSummary: AdminAnalyticsWindow) {
+    const section = document.createElement("section");
+    section.className = "admin-analytics-window";
+
+    const header = document.createElement("div");
+    header.className = "admin-analytics-window-header";
+
+    const title = document.createElement("div");
+    title.className = "admin-analytics-window-title";
+    title.textContent = windowSummary.label;
+
+    const since = document.createElement("div");
+    since.className = "admin-analytics-window-since";
+    since.textContent = `Since ${formatAdminDateTime(windowSummary.since)}`;
+
+    header.append(title, since);
+
+    const metrics = document.createElement("div");
+    metrics.className = "admin-analytics-grid admin-analytics-grid-compact";
+    appendAdminMetric(metrics, "Events", formatAdminCount(windowSummary.totalEvents));
+    appendAdminMetric(
+      metrics,
+      "Anonymous events",
+      formatAdminCount(windowSummary.anonymousEvents)
+    );
+    appendAdminMetric(
+      metrics,
+      "Signed-in events",
+      formatAdminCount(windowSummary.authenticatedEvents)
+    );
+    appendAdminMetric(
+      metrics,
+      "Anonymous visitors",
+      formatAdminCount(windowSummary.uniqueAnonymousVisitors)
+    );
+    appendAdminMetric(
+      metrics,
+      "Signed-in users",
+      formatAdminCount(windowSummary.uniqueAuthenticatedUsers)
+    );
+
+    const table = document.createElement("table");
+    table.className = "admin-analytics-table";
+
+    const tbody = document.createElement("tbody");
+    for (const eventName of ADMIN_EVENT_ORDER) {
+      const row = document.createElement("tr");
+
+      const nameCell = document.createElement("th");
+      nameCell.scope = "row";
+      nameCell.textContent = ADMIN_EVENT_LABELS[eventName];
+
+      const countCell = document.createElement("td");
+      countCell.textContent = formatAdminCount(windowSummary.eventCounts[eventName] ?? 0);
+
+      row.append(nameCell, countCell);
+      tbody.append(row);
+    }
+
+    table.append(tbody);
+    section.append(header, metrics, table);
+    parent.append(section);
+  }
+
+  function renderAdminSummary(
+    totalsEl: HTMLElement,
+    windowsEl: HTMLElement,
+    noteEl: HTMLElement,
+    summary: AdminAnalyticsSummary
+  ) {
+    totalsEl.innerHTML = "";
+    windowsEl.innerHTML = "";
+
+    appendAdminMetric(
+      totalsEl,
+      "Registered users",
+      formatAdminCount(summary.totals.registeredUsers)
+    );
+    appendAdminMetric(
+      totalsEl,
+      "Active memos",
+      formatAdminCount(summary.totals.activeMemos)
+    );
+    appendAdminMetric(
+      totalsEl,
+      "Dust memos",
+      formatAdminCount(summary.totals.trashedMemos)
+    );
+    appendAdminMetric(
+      totalsEl,
+      "Feedback, last 30 days",
+      formatAdminCount(summary.totals.feedbackSubmissionsLast30d),
+      `Generated ${formatAdminDateTime(summary.generatedAt)}`
+    );
+
+    for (const windowSummary of summary.windows) {
+      renderAdminWindow(windowsEl, windowSummary);
+    }
+
+    noteEl.hidden = !summary.notes.recentEventRowsTruncated;
+    noteEl.textContent = summary.notes.recentEventRowsTruncated
+      ? `Recent event rows were capped at ${formatAdminCount(
+          summary.notes.recentEventRowsLimit
+        )}.`
+      : "";
+  }
+
+  export function mountAdminAnalyticsUI(app: HTMLDivElement, message = "") {
+    resetScreenHandlers();
+    app.innerHTML = adminAnalyticsUIHtml;
+
+    const msgEl = qs<HTMLDivElement>("#adminAnalyticsMsg");
+    const totalsEl = qs<HTMLDivElement>("#adminAnalyticsTotals");
+    const windowsEl = qs<HTMLDivElement>("#adminAnalyticsWindows");
+    const noteEl = qs<HTMLDivElement>("#adminAnalyticsNote");
+    const refreshBtn = qs<HTMLButtonElement>("#adminAnalyticsRefreshBtn");
+    const backBtn = qs<HTMLButtonElement>("#adminAnalyticsBackBtn");
+
+    let busy = false;
+
+    const setMsg = (text: string, kind: "info" | "error" = "error") => {
+      if (!text) {
+        msgEl.hidden = true;
+        msgEl.textContent = "";
+        return;
+      }
+
+      msgEl.hidden = false;
+      msgEl.textContent = text;
+      msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
+    };
+
+    const setBusy = (value: boolean) => {
+      busy = value;
+      refreshBtn.disabled = value;
+      backBtn.disabled = value;
+    };
+
+    const loadSummary = async () => {
+      try {
+        setBusy(true);
+        setMsg("Loading admin analytics...", "info");
+
+        const summary = await getAdminAnalyticsSummary();
+        renderAdminSummary(totalsEl, windowsEl, noteEl, summary);
+        setMsg("");
+      } catch (error) {
+        console.error(error);
+        totalsEl.innerHTML = "";
+        windowsEl.innerHTML = "";
+        noteEl.hidden = true;
+        noteEl.textContent = "";
+        setMsg(formatAdminAnalyticsError(error), "error");
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    if (message) setMsg(message, authFlashKind);
+
+    refreshBtn.addEventListener("click", () => {
+      if (busy) return;
+      void loadSummary();
+    });
+
+    backBtn.addEventListener("click", async () => {
+      if (busy) return;
+      appScreen = "accountSettings";
+      await rerender();
+    });
+
+    void loadSummary();
   }
 
   export function mountResetPasswordUI(app: HTMLDivElement) {
