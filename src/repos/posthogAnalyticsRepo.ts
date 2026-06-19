@@ -17,12 +17,18 @@ type PostHogIdentityInput = {
   userId: string | null;
 };
 
+type PostHogExceptionSource = "window_error" | "unhandledrejection";
+
 const ALLOWED_POSTHOG_PROPERTY_KEYS = new Set([
   "token",
   "app",
   "page_path",
   "typingnote_subject_id",
   "typingnote_subject_kind",
+  "exception_source",
+  "exception_filename",
+  "exception_lineno",
+  "exception_colno",
   "result",
   "trigger",
   "surface",
@@ -42,6 +48,7 @@ let disabledLogged = false;
 let currentDistinctId: string | null = null;
 let currentAnonymousId: string | null = null;
 let currentUserId: string | null = null;
+let manualExceptionCaptureInstalled = false;
 
 function canUsePostHog() {
   return POSTHOG_ENABLED && !!POSTHOG_KEY?.trim() && !!POSTHOG_HOST;
@@ -103,6 +110,61 @@ function getTypingNoteProperties(pagePath = getCurrentPagePath()): PostHogProper
   };
 }
 
+function numberOrNull(value: number) {
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function toErrorLike(value: unknown, fallbackMessage: string) {
+  if (value instanceof Error) return value;
+  if (typeof value === "string" && value.trim()) return new Error(value);
+  return new Error(fallbackMessage);
+}
+
+function capturePostHogException(
+  error: unknown,
+  metadata: PostHogProperties & { exception_source: PostHogExceptionSource }
+) {
+  try {
+    posthog.captureException(error, {
+      ...getTypingNoteProperties(),
+      ...metadata,
+    });
+  } catch (captureError) {
+    console.warn("[posthog] failed to capture exception", captureError);
+  }
+}
+
+function installManualExceptionCapture() {
+  if (manualExceptionCaptureInstalled) return;
+  if (typeof window === "undefined") return;
+
+  window.addEventListener("error", (event) => {
+    capturePostHogException(
+      event.error ?? toErrorLike(event.message, "Unhandled window error"),
+      {
+        exception_source: "window_error",
+        exception_filename: event.filename || null,
+        exception_lineno: numberOrNull(event.lineno),
+        exception_colno: numberOrNull(event.colno),
+      }
+    );
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    capturePostHogException(
+      toErrorLike(event.reason, "Unhandled promise rejection"),
+      {
+        exception_source: "unhandledrejection",
+        exception_filename: null,
+        exception_lineno: null,
+        exception_colno: null,
+      }
+    );
+  });
+
+  manualExceptionCaptureInstalled = true;
+}
+
 function initPostHog(anonymousId: string) {
   if (initialized) return true;
 
@@ -118,11 +180,7 @@ function initPostHog(anonymousId: string) {
     capture_pageleave: false,
     capture_heatmaps: false,
     capture_dead_clicks: false,
-    capture_exceptions: {
-      capture_unhandled_errors: true,
-      capture_unhandled_rejections: true,
-      capture_console_errors: false,
-    },
+    capture_exceptions: false,
     capture_performance: false,
     disable_session_recording: true,
     disable_surveys: true,
@@ -159,6 +217,7 @@ function initPostHog(anonymousId: string) {
   initialized = true;
   currentDistinctId = anonymousId;
   currentAnonymousId = anonymousId;
+  installManualExceptionCapture();
   return true;
 }
 
