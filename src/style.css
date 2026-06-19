@@ -291,10 +291,24 @@ body {
   grid-template-columns: 1fr 1fr; /* 左右同じ幅 */
   gap: 12px;
   padding: 12px;
+  background: #f6f7f9;
 }
 
 /* tagbar 行が存在する時（=表示中）は、1行目を auto / 2行目を残り全部にして
    Input が空でも「タグバー〜ペイン」の間に巨大な余白が伸びないようにする */
+.panes.is-action-flashing {
+  animation: panes-action-flash 680ms ease-out;
+}
+
+@keyframes panes-action-flash {
+  0% {
+    background: #edf3f8;
+  }
+  100% {
+    background: #f6f7f9;
+  }
+}
+
 .panes:has(> .tagbar:not([hidden])){
   grid-template-rows: auto 1fr;
 }

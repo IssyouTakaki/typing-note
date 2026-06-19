@@ -556,7 +556,26 @@ function keyConfirmDustRestoreAndOpen(message: string): Promise<boolean> {
 }
 
 let msgTimer: number | undefined;
+type MessageOptions = {
+  flashPanes?: boolean;
+};
+let editorPanesFlashTimer: number | undefined;
 // let msgHoldUntil = 0;
+
+function flashEditorPanesAction() {
+  const panes = document.querySelector<HTMLDivElement>("#editorView .panes");
+  if (!panes) return;
+
+  panes.classList.remove("is-action-flashing");
+  void panes.offsetWidth;
+  panes.classList.add("is-action-flashing");
+
+  if (editorPanesFlashTimer) window.clearTimeout(editorPanesFlashTimer);
+  editorPanesFlashTimer = window.setTimeout(() => {
+    panes.classList.remove("is-action-flashing");
+    editorPanesFlashTimer = undefined;
+  }, 700);
+}
 
 function calcMessageDurationMs(text: string): number {
   // 文字数が長いほど表示時間を伸ばす（短文は最低でも少し長め）
@@ -567,18 +586,23 @@ function calcMessageDurationMs(text: string): number {
   return Math.min(max, Math.max(min, auto));
 }
 
-function showMessage(text: string, ms?: number) {
+function showMessage(text: string, ms?: number, options?: MessageOptions) {
   const msgText = qs<HTMLSpanElement>("#msgText");
   const duration = ms ?? calcMessageDurationMs(text);
 
   msgText.textContent = text;
   // msgHoldUntil = Date.now() + duration;
+  if (options?.flashPanes) flashEditorPanesAction();
 
   if (msgTimer) window.clearTimeout(msgTimer);
   msgTimer = window.setTimeout(() => {
     // msgHoldUntil = 0;
     msgText.textContent = activeTab().dirty ? "Unsaved" : "";
   }, duration);
+}
+
+function showActionMessage(text: string, ms?: number) {
+  showMessage(text, ms, { flashPanes: true });
 }
 
 async function requireUserId(): Promise<string> {
@@ -868,8 +892,8 @@ function registerSaveShortcut() {
     try {
       const result = await saveIfDirty("shortcut");
 
-      if (result === "updated") showMessage("Updated ✨");
-      else if (result === "created") showMessage("Created a new memo 🚀");
+      if (result === "updated") showActionMessage("Updated ✨");
+      else if (result === "created") showActionMessage("Created a new memo 🚀");
       else if (result === "auth_required") showMessage(t("msgSaveRequiresAccount"), 4500);
       else showMessage("Nothing to save - you're all set.");
     } catch (err) {
@@ -2041,7 +2065,7 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
 
     memoViewportStateByTabId.delete(id);
     await activateTab(id, { skipSaveViewport: true });
-    showMessage(`Moved to Explorer and opened → ${memoTitleFromContent(memo.content)}`);
+    showActionMessage(`Moved to Explorer and opened → ${memoTitleFromContent(memo.content)}`);
     focusMemoStart();
     return true;
   };
@@ -2262,8 +2286,8 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     await activateTab(target.id);
   
     const title = getTabLabel(target);
-    if (saveResult === "updated") showMessage(`Updated ✨ → Tab ${digit}: ${title}`);
-    else if (saveResult === "created") showMessage(`Created 🚀 → Tab ${digit}: ${title}`);
+    if (saveResult === "updated") showActionMessage(`Updated ✨ → Tab ${digit}: ${title}`);
+    else if (saveResult === "created") showActionMessage(`Created 🚀 → Tab ${digit}: ${title}`);
     else showMessage(`Switched → Tab ${digit}: ${title}`);
   };
   
@@ -2305,8 +2329,8 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     const title = getTabLabel(target);
     const arrow = delta < 0 ? "←" : "→";
 
-    if (saveResult === "updated") showMessage(`Updated ✨ ${arrow} Tab ${tabNumber}: ${title}`);
-    else if (saveResult === "created") showMessage(`Created 🚀 ${arrow} Tab ${tabNumber}: ${title}`);
+    if (saveResult === "updated") showActionMessage(`Updated ✨ ${arrow} Tab ${tabNumber}: ${title}`);
+    else if (saveResult === "created") showActionMessage(`Created 🚀 ${arrow} Tab ${tabNumber}: ${title}`);
     else showMessage(`Switched ${arrow} Tab ${tabNumber}: ${title}`);
   };
 
@@ -2494,6 +2518,22 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
   
   let msgTimer: number | undefined;
   let msgHoldUntil = 0;
+  type MessageOptions = {
+    flashPanes?: boolean;
+  };
+  let panesFlashTimer: number | undefined;
+
+  function flashPanesAction() {
+    panes.classList.remove("is-action-flashing");
+    void panes.offsetWidth;
+    panes.classList.add("is-action-flashing");
+
+    if (panesFlashTimer) window.clearTimeout(panesFlashTimer);
+    panesFlashTimer = window.setTimeout(() => {
+      panes.classList.remove("is-action-flashing");
+      panesFlashTimer = undefined;
+    }, 700);
+  }
 
   function calcMessageDurationMs(text: string): number {
     const len = text.replace(/\s+/g, " ").trim().length;
@@ -2503,17 +2543,22 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     return Math.min(max, Math.max(min, auto));
   }
 
-  function showMessage(text: string, ms?: number) {
+  function showMessage(text: string, ms?: number, options?: MessageOptions) {
     const duration = ms ?? calcMessageDurationMs(text);
 
     msgText.textContent = text;
     msgHoldUntil = Date.now() + duration;
+    if (options?.flashPanes) flashPanesAction();
 
     if (msgTimer) window.clearTimeout(msgTimer);
     msgTimer = window.setTimeout(() => {
       msgHoldUntil = 0;
       msgText.textContent = activeTab().dirty ? "Unsaved" : "";
     }, duration);
+  }
+
+  function showActionMessage(text: string, ms?: number) {
+    showMessage(text, ms, { flashPanes: true });
   }
 
   togglePreviewWideHandler = async () => {
@@ -3336,7 +3381,7 @@ input.addEventListener("copy", (e) => {
       if (decision === "erase") {
         await hardDeleteMemo({ userId, id });
 
-        showMessage("Deleted forever 🔥");
+        showActionMessage("Deleted forever 🔥");
         await loadDust();       // Dust を再描画
         setView("dust");
         return;
@@ -3345,7 +3390,7 @@ input.addEventListener("copy", (e) => {
       if (decision === "restore") {
         await restoreMemo({ userId, id });
 
-        showMessage("Restored ✨");
+        showActionMessage("Restored ✨");
         await goExplorer();     // Explorer を開いて一覧を再描画
         setView("dust");
 
@@ -3385,7 +3430,7 @@ input.addEventListener("copy", (e) => {
       if (decision === "erase") {
         await hardDeleteMemo({ userId, id });
 
-        showMessage("Deleted forever 🔥");
+        showActionMessage("Deleted forever 🔥");
         await loadDust();       // Dust を再描画
         setView("dust");
         return;
@@ -3394,7 +3439,7 @@ input.addEventListener("copy", (e) => {
       if (decision === "restore") {
         await restoreMemo({ userId, id });
 
-        showMessage("Restored ✨");
+        showActionMessage("Restored ✨");
         await goExplorer();     // Explorer を開いて一覧を再描画
         setView("dust");
 
@@ -3428,7 +3473,8 @@ input.addEventListener("copy", (e) => {
         result: "activated",
         trigger: "shortcut_tab",
       });
-      showMessage(r === "updated" ? "Updated ✨ — Explorer tab activated" : "Explorer tab activated");
+      if (r === "updated") showActionMessage("Updated ✨ — Explorer tab activated");
+      else showMessage("Explorer tab activated");
       return;
     }
 
@@ -3441,7 +3487,8 @@ input.addEventListener("copy", (e) => {
       trigger: "shortcut_tab",
     });
 
-    showMessage(r === "updated" ? "Updated ✨ — Explorer tab opened" : "Explorer tab opened");
+    if (r === "updated") showActionMessage("Updated ✨ — Explorer tab opened");
+    else showMessage("Explorer tab opened");
   }
   
   async function openDustTabByShortcut() {
@@ -3463,7 +3510,8 @@ input.addEventListener("copy", (e) => {
         result: "activated",
         trigger: "shortcut_tab",
       });
-      showMessage(r === "updated" ? "Updated ✨ — Dust tab activated" : "Dust tab activated");
+      if (r === "updated") showActionMessage("Updated ✨ — Dust tab activated");
+      else showMessage("Dust tab activated");
       return;
     }
 
@@ -3476,7 +3524,8 @@ input.addEventListener("copy", (e) => {
       trigger: "shortcut_tab",
     });
 
-    showMessage(r === "updated" ? "Updated ✨ — Dust tab opened" : "Dust tab opened");
+    if (r === "updated") showActionMessage("Updated ✨ — Dust tab opened");
+    else showMessage("Dust tab opened");
   }
 
   async function goExplorer() {
@@ -3495,7 +3544,8 @@ input.addEventListener("copy", (e) => {
   
     setView("explorer");
     trackEvent("explorer_opened", { result: "opened", trigger: "button" });
-    showMessage(r === "updated" ? "Updated ✨ — Explorer opened" : "Explorer opened");
+    if (r === "updated") showActionMessage("Updated ✨ — Explorer opened");
+    else showMessage("Explorer opened");
   
     await loadExplorer();
   }  
@@ -3515,7 +3565,8 @@ input.addEventListener("copy", (e) => {
     const r = await autoUpdateIfEditingCurrentMemo();
     setView("dust");
     trackEvent("dust_opened", { result: "opened", trigger: "button" });
-    showMessage(r === "updated" ? "Updated ✨ — Dust opened" : "Dust opened");
+    if (r === "updated") showActionMessage("Updated ✨ — Dust opened");
+    else showMessage("Dust opened");
     await loadDust();
   }
 
@@ -3593,7 +3644,7 @@ input.addEventListener("copy", (e) => {
 
       if (alreadyOpenTab) {
         await activateTab(alreadyOpenTab.id);
-        showMessage(`Moved to Explorer and switched → ${memoTitleFromContent(alreadyOpenTab.text)}`);
+        showActionMessage(`Moved to Explorer and switched → ${memoTitleFromContent(alreadyOpenTab.text)}`);
       } else {
         await openMemoInNewEditorTab(memo);
       }
@@ -3640,7 +3691,8 @@ input.addEventListener("copy", (e) => {
   
         await activateTab(newId, { skipSaveViewport: true });
   
-        showMessage(needsSave ? `Saved & closed: ${title}` : `Closed: ${title}`);
+        if (needsSave) showActionMessage(`Saved & closed: ${title}`);
+        else showMessage(`Closed: ${title}`);
         return;
       }
   
@@ -3660,7 +3712,8 @@ input.addEventListener("copy", (e) => {
   
       await activateTab(next.id, { skipSaveViewport: true });
   
-      showMessage(needsSave ? `Saved & closed: ${title}` : `Closed: ${title}`);
+      if (needsSave) showActionMessage(`Saved & closed: ${title}`);
+      else showMessage(`Closed: ${title}`);
     } catch (err) {
       console.error("close tab failed", err);
       showMessage("Oops — close tab failed 😵‍💫", 2500);
@@ -3743,7 +3796,7 @@ input.addEventListener("copy", (e) => {
         state.explorerSelectedIds.clear();
         updateExplorerStateText();
 
-        showMessage("Moved to Dust 🗑️");
+        showActionMessage("Moved to Dust 🗑️");
         setView("dust");
         await loadDust();
       } catch (err) {
@@ -3779,7 +3832,7 @@ input.addEventListener("copy", (e) => {
             await hardDeleteMemo({ userId, id });
           }
           state.dustSelectedIds.clear();
-          showMessage("Deleted forever 🔥");
+          showActionMessage("Deleted forever 🔥");
           await loadDust();
           setView("dust");
           return;
@@ -3790,7 +3843,7 @@ input.addEventListener("copy", (e) => {
           await restoreMemo({ userId, id });
         }
         state.dustSelectedIds.clear();
-        showMessage("Restored ✨");
+        showActionMessage("Restored ✨");
         await loadDust();
         setView("dust");
       } catch (err) {
@@ -3827,7 +3880,7 @@ input.addEventListener("copy", (e) => {
 
       await closeActiveMemoTabAfterTrash([deletedMemoId]);
 
-      showMessage("Moved to Dust 🗑️");
+      showActionMessage("Moved to Dust 🗑️");
       setView("dust");
       await loadDust();
     } catch (err) {
