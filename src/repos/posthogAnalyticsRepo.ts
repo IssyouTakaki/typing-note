@@ -12,6 +12,7 @@ type PostHogEventInput = {
 };
 
 const ALLOWED_POSTHOG_PROPERTY_KEYS = new Set([
+  "token",
   "app",
   "page_path",
   "typingnote_subject_id",
