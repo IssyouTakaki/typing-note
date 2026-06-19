@@ -2,6 +2,7 @@ import posthog from "posthog-js/dist/module.no-external";
 import type { AppEventName } from "./analyticsRepo";
 
 type PostHogProperties = Record<string, string | number | boolean | null>;
+type PostHogExceptionProperties = Record<string, unknown>;
 
 type PostHogEventInput = {
   eventName: AppEventName;
@@ -9,6 +10,11 @@ type PostHogEventInput = {
   anonymousId: string;
   userId: string | null;
   pagePath: string;
+};
+
+type PostHogIdentityInput = {
+  anonymousId: string;
+  userId: string | null;
 };
 
 const ALLOWED_POSTHOG_PROPERTY_KEYS = new Set([
@@ -34,6 +40,8 @@ const POSTHOG_HOST = (import.meta.env.VITE_POSTHOG_HOST as string | undefined)
 let initialized = false;
 let disabledLogged = false;
 let currentDistinctId: string | null = null;
+let currentAnonymousId: string | null = null;
+let currentUserId: string | null = null;
 
 function canUsePostHog() {
   return POSTHOG_ENABLED && !!POSTHOG_KEY?.trim() && !!POSTHOG_HOST;
@@ -65,6 +73,36 @@ function filterPostHogProperties(properties: unknown) {
   return clean;
 }
 
+function filterPostHogExceptionProperties(properties: unknown) {
+  const clean: PostHogExceptionProperties = {};
+  if (!properties || typeof properties !== "object") return clean;
+
+  for (const [key, value] of Object.entries(properties as Record<string, unknown>)) {
+    if (ALLOWED_POSTHOG_PROPERTY_KEYS.has(key) || key.startsWith("$exception")) {
+      clean[key] = value;
+    }
+  }
+
+  return clean;
+}
+
+function getCurrentPagePath() {
+  try {
+    return globalThis.location?.pathname?.slice(0, 200) || "/";
+  } catch {
+    return "/";
+  }
+}
+
+function getTypingNoteProperties(pagePath = getCurrentPagePath()): PostHogProperties {
+  return {
+    app: "typing-note",
+    page_path: pagePath,
+    typingnote_subject_id: currentUserId ?? currentAnonymousId,
+    typingnote_subject_kind: currentUserId ? "authenticated" : "anonymous",
+  };
+}
+
 function initPostHog(anonymousId: string) {
   if (initialized) return true;
 
@@ -80,7 +118,11 @@ function initPostHog(anonymousId: string) {
     capture_pageleave: false,
     capture_heatmaps: false,
     capture_dead_clicks: false,
-    capture_exceptions: false,
+    capture_exceptions: {
+      capture_unhandled_errors: true,
+      capture_unhandled_rejections: true,
+      capture_console_errors: false,
+    },
     capture_performance: false,
     disable_session_recording: true,
     disable_surveys: true,
@@ -100,6 +142,14 @@ function initPostHog(anonymousId: string) {
     },
     before_send: (event) => {
       if (!event) return null;
+      if (event.event === "$exception") {
+        event.properties = filterPostHogExceptionProperties({
+          ...event.properties,
+          ...getTypingNoteProperties(),
+        });
+        return event;
+      }
+
       if (event.event.startsWith("$")) return null;
       event.properties = filterPostHogProperties(event.properties);
       return event;
@@ -108,10 +158,14 @@ function initPostHog(anonymousId: string) {
 
   initialized = true;
   currentDistinctId = anonymousId;
+  currentAnonymousId = anonymousId;
   return true;
 }
 
 function syncDistinctId(userId: string | null, anonymousId: string) {
+  currentUserId = userId;
+  currentAnonymousId = anonymousId;
+
   const nextDistinctId = userId ?? anonymousId;
   if (currentDistinctId === nextDistinctId) return;
 
@@ -125,18 +179,28 @@ function syncDistinctId(userId: string | null, anonymousId: string) {
   currentDistinctId = nextDistinctId;
 }
 
+function configurePostHogIdentity(userId: string | null, anonymousId: string) {
+  if (!initPostHog(anonymousId)) return false;
+
+  syncDistinctId(userId, anonymousId);
+  return true;
+}
+
+export function configurePostHog(input: PostHogIdentityInput): void {
+  try {
+    configurePostHogIdentity(input.userId, input.anonymousId);
+  } catch (error) {
+    console.warn("[posthog] failed to configure", error);
+  }
+}
+
 export function trackPostHogEvent(input: PostHogEventInput): void {
   try {
-    if (!initPostHog(input.anonymousId)) return;
-
-    syncDistinctId(input.userId, input.anonymousId);
+    if (!configurePostHogIdentity(input.userId, input.anonymousId)) return;
 
     posthog.capture(input.eventName, {
       ...input.metadata,
-      app: "typing-note",
-      page_path: input.pagePath,
-      typingnote_subject_id: input.userId ?? input.anonymousId,
-      typingnote_subject_kind: input.userId ? "authenticated" : "anonymous",
+      ...getTypingNoteProperties(input.pagePath),
     });
   } catch (error) {
     console.warn("[posthog] failed to track event", input.eventName, error);

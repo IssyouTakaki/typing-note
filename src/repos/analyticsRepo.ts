@@ -140,6 +140,10 @@ function getAnonymousId() {
   return cachedAnonymousId;
 }
 
+export function getAnalyticsAnonymousId() {
+  return getAnonymousId();
+}
+
 function getSessionId() {
   if (cachedSessionId) return cachedSessionId;
 
