@@ -1,5 +1,7 @@
 import { supabase } from "../lib/supabaseClient";
+import { getAnalyticsAnonymousId } from "../repos/analyticsRepo";
 import { getProfileLocale } from "../repos/authRepo";
+import { configurePostHog } from "../repos/posthogAnalyticsRepo";
 import {
   applyI18nProfile,
   resetI18nToBrowserLocale,
@@ -83,10 +85,18 @@ async function rerender(message = "") {
   mountMemoUI(app, { rerender: () => rerender() });
 }
 
+function syncPostHogIdentity(session: any | null) {
+  configurePostHog({
+    anonymousId: getAnalyticsAnonymousId(),
+    userId: session?.user?.id ?? null,
+  });
+}
+
 async function syncI18nFromSession(sessionOverride?: any) {
   const session =
-    sessionOverride ??
-    (await supabase.auth.getSession()).data.session;
+    sessionOverride === undefined
+      ? (await supabase.auth.getSession()).data.session
+      : sessionOverride;
 
   if (!session?.user?.id) {
     resetI18nToBrowserLocale();
@@ -107,6 +117,8 @@ function shouldKeepCurrentScreenOnSignedIn() {
 }
 
 export async function mountApp() {
+  syncPostHogIdentity(null);
+
   configureAuthScreens({ rerender, resetScreenHandlers: resetMemoScreenHandlers });
 
   const initialUrl = new URL(window.location.href);
@@ -121,6 +133,8 @@ export async function mountApp() {
       hasSession: !!session,
       userId: session?.user?.id ?? null,
     });
+
+    syncPostHogIdentity(session);
 
     if (event === "PASSWORD_RECOVERY") {
       setAuthMode("recovery");
@@ -162,6 +176,8 @@ export async function mountApp() {
     }
   });
 
-  await syncI18nFromSession();
+  const initialSession = (await supabase.auth.getSession()).data.session;
+  syncPostHogIdentity(initialSession);
+  await syncI18nFromSession(initialSession);
   await rerender();
 }
