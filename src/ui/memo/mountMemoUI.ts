@@ -1021,6 +1021,7 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     Math.max(0, Math.min(value.length, position));
 
   const PREVIEW_CARET_ANCHOR_LINE = 4;
+  const INPUT_CARET_ANCHOR_LINE = 4;
 
   const saveActiveMemoViewport = () => {
     if (state.view !== "editor") return;
@@ -1241,11 +1242,13 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     const lineStart = getLineStartIndex(value, pos);
     const lineNo = value.slice(0, lineStart).split(/\r?\n/).length - 1;
     const lineHeight = Number.parseFloat(window.getComputedStyle(input).lineHeight) || 22;
-
-    input.scrollTop = Math.max(
+    const maxScroll = Math.max(0, input.scrollHeight - input.clientHeight);
+    const targetTop = Math.max(
       0,
-      lineNo * lineHeight - input.clientHeight / 2 + lineHeight * 2
+      (lineNo - (INPUT_CARET_ANCHOR_LINE - 1)) * lineHeight
     );
+
+    input.scrollTop = Math.min(maxScroll, targetTop);
     input.scrollLeft = 0;
   };
   
@@ -1283,17 +1286,7 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
 
     input.focus();
     input.setSelectionRange(pos, pos);
-
-    const lineStart = getLineStartIndex(value, pos);
-    const lineNo = value.slice(0, lineStart).split(/\r?\n/).length - 1;
-    const lineHeight = Number.parseFloat(window.getComputedStyle(input).lineHeight) || 22;
-    const targetTop = Math.max(
-      0,
-      lineNo * lineHeight - input.clientHeight / 2 + lineHeight * 2
-    );
-
-    input.scrollTop = targetTop;
-    input.scrollLeft = 0;
+    scrollInputToTextPosition(pos);
 
     syncPreviewToCaret();
     saveActiveMemoViewport();
