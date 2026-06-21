@@ -292,7 +292,6 @@ body {
   grid-template-columns: 1fr 1fr; /* 左右同じ幅 */
   gap: 12px;
   padding: 12px;
-  border-radius: 12px;
   background: #f6f7f9;
 }
 
@@ -302,7 +301,7 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: inherit;
+  border-radius: 12px;
   background: linear-gradient(
     135deg,
     #fffbe8 0%,
@@ -322,6 +321,10 @@ body {
   animation: panes-action-flash 680ms ease-out;
 }
 
+.panes.is-action-flashing {
+  animation: panes-action-flash-base 680ms ease-out;
+}
+
 @keyframes panes-action-flash {
   0%,
   18% {
@@ -329,6 +332,16 @@ body {
   }
   100% {
     opacity: 0;
+  }
+}
+
+@keyframes panes-action-flash-base {
+  0%,
+  18% {
+    background: #fff;
+  }
+  100% {
+    background: #f6f7f9;
   }
 }
 
