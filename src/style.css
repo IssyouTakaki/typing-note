@@ -302,7 +302,7 @@ body {
 
 @keyframes panes-action-flash {
   0% {
-    background: #edf3f8;
+    background: #fff0a8;
   }
   100% {
     background: #f6f7f9;
