@@ -1236,16 +1236,68 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     scrollPreviewToTextPosition(input.selectionStart ?? 0);
   };
 
-  const scrollInputToTextPosition = (position: number) => {
+  const measureInputTextPositionTop = (position: number) => {
     const value = input.value;
     const pos = clampSelectionPosition(value, position);
-    const lineStart = getLineStartIndex(value, pos);
-    const lineNo = value.slice(0, lineStart).split(/\r?\n/).length - 1;
-    const lineHeight = Number.parseFloat(window.getComputedStyle(input).lineHeight) || 22;
+    const inputStyle = window.getComputedStyle(input);
+    const mirror = document.createElement("div");
+    const marker = document.createElement("span");
+
+    Object.assign(mirror.style, {
+      position: "absolute",
+      visibility: "hidden",
+      pointerEvents: "none",
+      left: "-100000px",
+      top: "0",
+      width: `${input.clientWidth}px`,
+      height: "auto",
+      minHeight: "0",
+      overflow: "hidden",
+      boxSizing: "border-box",
+      whiteSpace: inputStyle.whiteSpace,
+      overflowWrap: inputStyle.overflowWrap,
+      wordBreak: inputStyle.wordBreak,
+      fontFamily: inputStyle.fontFamily,
+      fontSize: inputStyle.fontSize,
+      fontStyle: inputStyle.fontStyle,
+      fontWeight: inputStyle.fontWeight,
+      fontVariant: inputStyle.fontVariant,
+      fontStretch: inputStyle.fontStretch,
+      lineHeight: inputStyle.lineHeight,
+      letterSpacing: inputStyle.letterSpacing,
+      wordSpacing: inputStyle.wordSpacing,
+      textAlign: inputStyle.textAlign,
+      textIndent: inputStyle.textIndent,
+      textTransform: inputStyle.textTransform,
+      paddingTop: inputStyle.paddingTop,
+      paddingRight: inputStyle.paddingRight,
+      paddingBottom: inputStyle.paddingBottom,
+      paddingLeft: inputStyle.paddingLeft,
+      border: "0",
+      tabSize: inputStyle.tabSize,
+    });
+
+    mirror.append(document.createTextNode(value.slice(0, pos)));
+    marker.textContent = "\u200b";
+    mirror.append(marker);
+    document.body.append(mirror);
+
+    try {
+      return marker.offsetTop;
+    } finally {
+      mirror.remove();
+    }
+  };
+
+  const scrollInputToTextPosition = (position: number) => {
+    const inputStyle = window.getComputedStyle(input);
+    const lineHeight = Number.parseFloat(inputStyle.lineHeight) || 22;
+    const paddingTop = Number.parseFloat(inputStyle.paddingTop) || 0;
+    const positionTop = measureInputTextPositionTop(position);
     const maxScroll = Math.max(0, input.scrollHeight - input.clientHeight);
     const targetTop = Math.max(
       0,
-      (lineNo - (INPUT_CARET_ANCHOR_LINE - 1)) * lineHeight
+      positionTop - paddingTop - (INPUT_CARET_ANCHOR_LINE - 1) * lineHeight
     );
 
     input.scrollTop = Math.min(maxScroll, targetTop);
