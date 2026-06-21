@@ -287,7 +287,6 @@ body {
 
 .panes {
   flex: 1;
-  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr; /* 左右同じ幅 */
   gap: 12px;
@@ -297,41 +296,16 @@ body {
 
 /* tagbar 行が存在する時（=表示中）は、1行目を auto / 2行目を残り全部にして
    Input が空でも「タグバー〜ペイン」の間に巨大な余白が伸びないようにする */
-.panes::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 12px;
-  background: linear-gradient(
-    135deg,
-    #fffbe8 0%,
-    #fff5ca 55%,
-    #fff9e2 100%
-  );
-  opacity: 0;
-  pointer-events: none;
-}
-
-.panes > * {
-  position: relative;
-  z-index: 1;
-}
-
-.panes.is-action-flashing::before {
+.panes.is-action-flashing {
   animation: panes-action-flash 680ms ease-out;
 }
 
-.panes.is-action-flashing {
-  background: #fff;
-}
-
 @keyframes panes-action-flash {
-  0%,
-  18% {
-    opacity: 1;
+  0% {
+    background: #fff0a8;
   }
   100% {
-    opacity: 0;
+    background: #f6f7f9;
   }
 }
 
