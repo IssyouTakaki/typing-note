@@ -322,7 +322,7 @@ body {
 }
 
 .panes.is-action-flashing {
-  animation: panes-action-flash-base 680ms ease-out;
+  background: #fff;
 }
 
 @keyframes panes-action-flash {
@@ -332,16 +332,6 @@ body {
   }
   100% {
     opacity: 0;
-  }
-}
-
-@keyframes panes-action-flash-base {
-  0%,
-  18% {
-    background: #fff;
-  }
-  100% {
-    background: #f6f7f9;
   }
 }
 
