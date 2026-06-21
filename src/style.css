@@ -287,6 +287,8 @@ body {
 
 .panes {
   flex: 1;
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: 1fr 1fr; /* 左右同じ幅 */
   gap: 12px;
@@ -294,21 +296,36 @@ body {
   background: #f6f7f9;
 }
 
-/* tagbar 行が存在する時（=表示中）は、1行目を auto / 2行目を残り全部にして
-   Input が空でも「タグバー〜ペイン」の間に巨大な余白が伸びないようにする */
-.panes.is-action-flashing {
+.panes::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    135deg,
+    #fff8d6 0%,
+    #fff0a8 52%,
+    #fff6cc 100%
+  );
+  opacity: 0;
+  pointer-events: none;
+}
+
+.panes.is-action-flashing::before {
   animation: panes-action-flash 680ms ease-out;
 }
 
 @keyframes panes-action-flash {
   0% {
-    background: #fff0a8;
+    opacity: 1;
   }
   100% {
-    background: #f6f7f9;
+    opacity: 0;
   }
 }
 
+/* tagbar 行が存在する時（=表示中）は、1行目を auto / 2行目を残り全部にして
+   Input が空でも「タグバー〜ペイン」の間に巨大な余白が伸びないようにする */
 .panes:has(> .tagbar:not([hidden])){
   grid-template-rows: auto 1fr;
 }
