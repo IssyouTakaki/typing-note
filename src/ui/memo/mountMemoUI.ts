@@ -3456,55 +3456,6 @@ input.addEventListener("copy", (e) => {
     }
   });
 
-  // ---- wire dust (erase forever / restore)
-  dustList.addEventListener("click", async (ev) => {
-    const target = ev.target as HTMLElement | null;
-    const btn = target?.closest<HTMLButtonElement>("button.memo-row");
-    const id = btn?.dataset.id;
-    if (!id) return;
-    
-    // Keep a stable keyboard focus point for ↑/↓ and Space
-    state.dustFocusId = id;
-    syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
-    scrollFocusIntoView(dustList, state.dustFocusId, "auto");
-
-    try {
-      const userId = await requireUserId();
-      const memo = await getMemo({ userId, id });
-      if (!memo) return;
-
-      const title = memoTitleFromContent(memo.content);
-      const decision = await keyConfirmDust(
-        `"${title}"\n\nErase forever? (Y)\nRestore to Explorer? (N)`
-      );
-
-      if (decision === "erase") {
-        await hardDeleteMemo({ userId, id });
-
-        showActionMessage("Deleted forever 🔥");
-        await loadDust();       // Dust を再描画
-        setView("dust");
-        return;
-      }
-
-      if (decision === "restore") {
-        await restoreMemo({ userId, id });
-
-        showActionMessage("Restored ✨");
-        await goExplorer();     // Explorer を開いて一覧を再描画
-        setView("dust");
-
-        void loadExplorer();
-        return;
-      }
-
-      showMessage("Canceled.");
-    } catch (e) {
-      console.error(e);
-      showMessage("Oops — action failed 😵‍💫", 2500);
-    }
-  });
-
   async function openExplorerTabByShortcut() {
     const session = await getSession();
     if (!session) {
@@ -3771,21 +3722,64 @@ input.addEventListener("copy", (e) => {
     }
   };
   
-  const closeActiveMemoTabAfterTrash = async (memoIds: Iterable<string>): Promise<boolean> => {
+  const saveDirtyMemoTabsBeforeTrash = async (
+    userId: string,
+    memoIds: Iterable<string>
+  ): Promise<void> => {
     const ids = new Set(memoIds);
-    const tab = activeTab();
+    const dirtyTabs = state.tabs.filter(
+      (tab) =>
+        tab.mode === "editor" &&
+        tab.dirty &&
+        tab.currentMemoId !== null &&
+        ids.has(tab.currentMemoId)
+    );
 
-    if (tab.mode !== "editor") return false;
-    if (!tab.currentMemoId) return false;
-    if (!ids.has(tab.currentMemoId)) return false;
+    for (const tab of dirtyTabs) {
+      await updateMemo({
+        userId,
+        id: tab.currentMemoId!,
+        content: tab.text,
+      });
+      tab.dirty = false;
+      trackEvent("memo_updated", { trigger: "auto_update" });
+      trackEvent("memo_saved", { result: "updated", trigger: "auto_update" });
+    }
 
-    const idx = state.tabs.findIndex((t) => t.id === tab.id);
-    if (idx < 0) return false;
+    if (dirtyTabs.length > 0) renderTabs();
+  };
 
-    memoViewportStateByTabId.delete(tab.id);
+  const closeMemoTabsAfterTrash = async (
+    memoIds: Iterable<string>
+  ): Promise<number> => {
+    const ids = new Set(memoIds);
+    const shouldClose = (tab: TabState) =>
+      tab.mode === "editor" &&
+      tab.currentMemoId !== null &&
+      ids.has(tab.currentMemoId);
+    const closingTabs = state.tabs.filter(shouldClose);
 
-    // 最後の1枚は、タブ0枚にせず空の新規タブへ置き換える
-    if (state.tabs.length === 1) {
+    if (closingTabs.length === 0) return 0;
+
+    const activeIndex = state.tabs.findIndex((tab) => tab.id === state.activeTabId);
+    const activeWillClose = closingTabs.some((tab) => tab.id === state.activeTabId);
+    const fallbackTab = activeWillClose
+      ? state.tabs
+          .slice(0, activeIndex)
+          .reverse()
+          .find((tab) => !shouldClose(tab)) ??
+        state.tabs.slice(activeIndex + 1).find((tab) => !shouldClose(tab)) ??
+        null
+      : null;
+
+    for (const tab of closingTabs) {
+      memoViewportStateByTabId.delete(tab.id);
+    }
+
+    state.tabs = state.tabs.filter((tab) => !shouldClose(tab));
+
+    // 最後のメモタブも削除対象なら、タブ0枚にせず空の新規タブを用意する
+    if (state.tabs.length === 0) {
       const newId = crypto.randomUUID();
       state.tabs = [{
         id: newId,
@@ -3796,25 +3790,27 @@ input.addEventListener("copy", (e) => {
         returnToTabId: null,
       }];
       state.activeTabId = newId;
+    } else if (activeWillClose) {
+      state.activeTabId = fallbackTab?.id ?? state.tabs[0].id;
+    }
 
-      await activateTab(newId, { skipSaveViewport: true });
+    if (activeWillClose) {
+      await activateTab(state.activeTabId, { skipSaveViewport: true });
+    } else {
+      renderTabs();
+    }
+
+    return closingTabs.length;
+  };
+
+  const activateDustAfterTrash = async (): Promise<boolean> => {
+    const existingDustTab = findOpenSpecialTab("dust");
+    if (existingDustTab) {
+      await activateTab(existingDustTab.id);
       return true;
     }
 
-    const returnToTabId = tab.returnToTabId;
-
-    state.tabs.splice(idx, 1);
-
-    const next =
-      (returnToTabId
-        ? state.tabs.find((t) => t.id === returnToTabId) ?? null
-        : null) ??
-      state.tabs[Math.max(0, idx - 1)];
-
-    state.activeTabId = next.id;
-    await activateTab(next.id, { skipSaveViewport: true });
-
-    return true;
+    return createSpecialTab("dust", state.activeTabId);
   };
 
   deleteMemoHandler = async () => {
@@ -3837,19 +3833,20 @@ input.addEventListener("copy", (e) => {
         const userId = await requireUserId();
         const deletedIds = Array.from(state.explorerSelectedIds);
 
+        await saveDirtyMemoTabsBeforeTrash(userId, deletedIds);
+
         // sequential for safety
         for (const id of deletedIds) {
           await trashMemo({ userId, id });
         }
 
-        await closeActiveMemoTabAfterTrash(deletedIds);
+        await closeMemoTabsAfterTrash(deletedIds);
 
         state.explorerSelectedIds.clear();
         updateExplorerStateText();
 
         showActionMessage("Moved to Dust 🗑️");
-        setView("dust");
-        await loadDust();
+        await activateDustAfterTrash();
       } catch (err) {
         console.error("delete failed", err);
         showMessage("Oops — delete failed 😵‍💫", 2500);
@@ -3923,17 +3920,16 @@ input.addEventListener("copy", (e) => {
     }
   
     try {
-      await autoUpdateIfEditingCurrentMemo(); // dirtyなら更新してから捨てる
       const userId = await requireUserId();
       const deletedMemoId = tab.currentMemoId;
 
+      await saveDirtyMemoTabsBeforeTrash(userId, [deletedMemoId]);
       await trashMemo({ userId, id: deletedMemoId });
 
-      await closeActiveMemoTabAfterTrash([deletedMemoId]);
+      await closeMemoTabsAfterTrash([deletedMemoId]);
 
       showActionMessage("Moved to Dust 🗑️");
-      setView("dust");
-      await loadDust();
+      await activateDustAfterTrash();
     } catch (err) {
       console.error("delete failed", err);
       showMessage("Oops — delete failed 😵‍💫", 2500);
