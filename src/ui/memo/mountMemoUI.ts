@@ -220,14 +220,17 @@ const state: AppState = {
   dustSelectedIds: new Set<string>(),
 };
 
-function formatYmd(iso: string | null | undefined) {
+function formatYmdHms(iso: string | null | undefined) {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
-  return `${y}/${m}/${day}`;
+  const hour = String(d.getHours()).padStart(2, "0");
+  const minute = String(d.getMinutes()).padStart(2, "0");
+  const second = String(d.getSeconds()).padStart(2, "0");
+  return `${y}/${m}/${day} ${hour}:${minute}:${second}`;
 }
 
 function activeTab(): TabState {
@@ -3081,8 +3084,8 @@ input.addEventListener("copy", (e) => {
       .map((m) => {
         const title = escapeHtml(memoTitleFromContent(m.content));
         const snippet = escapeHtml(memoSnippet(m.content));
-        const created = formatYmd(m.created_at);
-        const updated = m.updated_at ? formatYmd(m.updated_at) : created;
+        const created = formatYmdHms(m.created_at);
+        const updated = m.updated_at ? formatYmdHms(m.updated_at) : created;
         const size = formatBytes(memoSizeBytes(m.content));
         const id = escapeHtml(m.id);
         return `
@@ -3112,7 +3115,7 @@ input.addEventListener("copy", (e) => {
       .map((m) => {
         const title = escapeHtml(memoTitleFromContent(m.content));
         const snippet = escapeHtml(memoSnippet(m.content));
-        const trashed = formatYmd(m.deleted_at);
+        const trashed = formatYmdHms(m.deleted_at);
         const size = formatBytes(memoSizeBytes(m.content));
         const id = escapeHtml(m.id);
         return `
