@@ -1,5 +1,5 @@
 <div class="layout auth-layout">
-    <form id="accountSettingsForm" class="auth-card" autocomplete="off">
+    <div class="auth-card">
         <div id="accountSettingsTitle" class="auth-title">アカウント設定</div>
 
         <div id="accountSettingsHelp" class="auth-help">
@@ -9,9 +9,7 @@
         <div id="accountSettingsMsg" class="auth-msg" hidden></div>
 
         <section class="account-section">
-            <div id="accountLanguageSectionTitle" class="account-section-title">表示言語</div>
-
-            <label id="accountLanguageLabel" class="auth-label" for="localePreferenceSelect">
+            <label id="accountLanguageLabel" class="account-section-title" for="localePreferenceSelect">
                 表示言語
             </label>
 
@@ -133,9 +131,6 @@
         </section>
 
         <div class="auth-actions auth-actions-stack-mobile">
-            <button id="accountSettingsSaveBtn" class="auth-btn auth-btn-primary" type="submit">
-                Save
-            </button>
             <button id="adminAnalyticsBtn" class="auth-btn auth-btn-secondary" type="button" hidden>
                 管理
             </button>
@@ -143,5 +138,5 @@
                 Back to TypingNote
             </button>
         </div>
-    </form>
+    </div>
 </div>

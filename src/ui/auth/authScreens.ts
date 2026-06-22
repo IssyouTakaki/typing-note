@@ -417,6 +417,8 @@ let pendingLogin2faVerification:
     }
   | null = null;
 
+let accountSettingsLocaleSaving = false;
+
 const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
   "typingnote.login-2fa-browser-secret";
 
@@ -1299,10 +1301,8 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     resetScreenHandlers();
     app.innerHTML = accountSettingsUIHtml;
 
-    const form = qs<HTMLFormElement>("#accountSettingsForm");
     const msgEl = qs<HTMLDivElement>("#accountSettingsMsg");
     const selectEl = qs<HTMLSelectElement>("#localePreferenceSelect");
-    const saveBtn = qs<HTMLButtonElement>("#accountSettingsSaveBtn");
     const adminAnalyticsBtn = qs<HTMLButtonElement>("#adminAnalyticsBtn");
     const backBtn = qs<HTMLButtonElement>("#accountSettingsBackBtn");
 
@@ -1367,7 +1367,6 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
     setText("#accountSettingsTitle", t("accountSettingsTitle"));
     setMultilineText("#accountSettingsHelp", t("accountSettingsHelp"));
-    setText("#accountLanguageSectionTitle", t("accountLanguageSectionTitle"));
     setText("#accountLanguageLabel", t("languageLabel"));
     setText("#localeOptionAuto", t("languageAuto"));
     setText("#localeOptionJa", t("languageJa"));
@@ -1389,7 +1388,6 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     setText("#newAccountPasswordLabel", t("newPassword"));
     setText("#newAccountPasswordConfirmLabel", t("newPasswordConfirm"));
     changePasswordBtn.textContent = t("accountChangePassword");
-    saveBtn.textContent = t("saveSettings");
     adminAnalyticsBtn.textContent = t("adminAnalyticsButton");
     backBtn.textContent = t("backToTypingNote");
 
@@ -1686,11 +1684,10 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         adminAnalyticsBtn.hidden = true;
       });
 
-    let busy = false;
+    let busy = accountSettingsLocaleSaving;
     const setBusy = (value: boolean) => {
       busy = value;
       selectEl.disabled = value;
-      saveBtn.disabled = value;
       adminAnalyticsBtn.disabled = value;
       backBtn.disabled = value;
       addAccountEmailInput.disabled = value;
@@ -1711,6 +1708,8 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
           button.disabled = value;
         });
     };
+
+    setBusy(busy);
 
     sendAccountEmailOtpBtn.addEventListener("click", async () => {
       if (busy) return;
@@ -1982,17 +1981,25 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       }
     );
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (busy) return;
+    selectEl.addEventListener("change", async () => {
+      if (busy || accountSettingsLocaleSaving) return;
 
+      const previous = getI18nState();
       const localePreference =
         normalizeLocalePreference(selectEl.value) ?? "auto";
       const resolvedLocale = resolveLocalePreference(localePreference);
+      let resultMessage = "";
+
+      accountSettingsLocaleSaving = true;
+      setBusy(true);
+      applyI18nProfile({
+        locale_preference: localePreference,
+        resolved_locale: resolvedLocale,
+      });
+      authFlashKind = "info";
 
       try {
-        setBusy(true);
-        setMsg(t("msgSettingsSaving"), "info");
+        await rerender(t("msgSettingsSaving"));
 
         const saved = await updateLocaleSettings({
           localePreference,
@@ -2002,12 +2009,18 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         applyI18nProfile(saved);
 
         authFlashKind = "info";
-        await rerender(t("msgSettingsSaved"));
+        resultMessage = t("msgSettingsSaved");
       } catch (error) {
         console.error(error);
-        setMsg(t("msgSettingsSaveFailed"), "error");
+        applyI18nProfile({
+          locale_preference: previous.localePreference,
+          resolved_locale: previous.resolvedLocale,
+        });
+        authFlashKind = "error";
+        resultMessage = t("msgSettingsSaveFailed");
       } finally {
-        setBusy(false);
+        accountSettingsLocaleSaving = false;
+        await rerender(resultMessage);
       }
     });
 

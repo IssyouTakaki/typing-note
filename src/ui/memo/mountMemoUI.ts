@@ -329,6 +329,7 @@ let renderTabsHandler: (() => void) | null = null;
 let openHeadingListPopupHandler: (() => Promise<void>) | null = null;
 let openSearchHandler: (() => Promise<void>) | null = null;
 let openFeedbackDialogHandler: (() => Promise<void>) | null = null;
+let saveMemoViewportBeforeScreenChangeHandler: (() => void) | null = null;
 
 // --- List focus / multi-select (Explorer & Dust) ---
 let explorerSelectToggleHandler: (() => Promise<void>) | null = null;
@@ -781,6 +782,7 @@ function registerSaveShortcut() {
 
       const session = await getSession();
       if (session) {
+        saveMemoViewportBeforeScreenChangeHandler?.();
         openAccountSettingsScreen();
       } else {
         openAccountScreen("signin");
@@ -1749,6 +1751,8 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
       searchBox.select();
     });
   };
+
+  saveMemoViewportBeforeScreenChangeHandler = saveActiveMemoViewport;
 
   const closeFeedbackDialog = (restoreFocus = true) => {
     if (!teardownFeedbackDialog) return;
@@ -2969,9 +2973,8 @@ input.addEventListener("blur", () => {
   memoInputHadFocus = false;
 });
 
-input.addEventListener("blur", () => {
-  closeTagSuggest();
-  saveActiveMemoViewport();
+input.addEventListener("focus", () => {
+  memoInputHadFocus = true;
 });
 
 input.addEventListener("keydown", (e) => {
@@ -3977,6 +3980,10 @@ input.addEventListener("copy", (e) => {
     openAccountScreen("signup");
   });
 
+  accountSettingsBtn.addEventListener("pointerdown", () => {
+    saveActiveMemoViewport();
+  });
+
   accountSettingsBtn.addEventListener("click", () => {
     openAccountSettingsScreen();
   });
@@ -4070,6 +4077,7 @@ export function resetMemoScreenHandlers() {
   openHeadingListPopupHandler = null;
   openSearchHandler = null;
   openFeedbackDialogHandler = null;
+  saveMemoViewportBeforeScreenChangeHandler = null;
 
   teardownFeedbackDialog?.();
   teardownFeedbackDialog = null;
