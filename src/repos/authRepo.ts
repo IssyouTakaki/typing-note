@@ -122,29 +122,14 @@ export async function signIn(email: string, password: string) {
   return data;
 }
 
-export async function changePasswordWithCurrentPassword(args: {
-  currentPassword: string;
-  newPassword: string;
-}): Promise<void> {
-  const user = await getUser();
-  const email = user?.email?.trim();
+export async function changePassword(newPassword: string): Promise<void> {
+  if (!newPassword) throw new Error("newPassword is required");
 
-  if (!email) throw new Error("Current login email was not found");
-  if (!args.currentPassword) throw new Error("currentPassword is required");
-  if (!args.newPassword) throw new Error("newPassword is required");
-
-  const { error: signInError } = await supabase.auth.signInWithPassword({
-    email,
-    password: args.currentPassword,
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
   });
 
-  if (signInError) throw signInError;
-
-  const { error: updateError } = await supabase.auth.updateUser({
-    password: args.newPassword,
-  });
-
-  if (updateError) throw updateError;
+  if (error) throw error;
 }
 
 export async function signOut() {

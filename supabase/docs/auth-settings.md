@@ -16,8 +16,8 @@ Recorded from Supabase Dashboard screenshots shared on 2026-06-17.
 | Confirm email | enabled | Users confirm email before first sign-in |
 | Secure email change | enabled | Supabase client email changes require old and new email confirmation |
 | Confirm email change | enabled by template/config context | Change email template is configured |
-| Secure password change | disabled | App will require current password before changing password |
-| Require current password when updating | disabled | App will enforce this at UI/repo layer |
+| Secure password change | disabled | Logged-in password changes use the existing authenticated session |
+| Require current password when updating | disabled | Current password is not requested in Account settings |
 | Prevent use of leaked passwords | disabled | Free plan screen notes this is Pro plan and above |
 | Email OTP enabled | enabled by template/config context | Magic link or OTP template is configured |
 | Password min length | 8 | TypingNote client policy is 8 |
@@ -118,8 +118,7 @@ Recommended rule:
 
 Recommended rule:
 
-- Require current password.
+- Use the existing authenticated session without requesting the current password.
 - Validate the new password with the same policy used by sign-up/reset.
-- Reauthenticate with the current password before calling password update.
-- Sign the user out after a successful password change, or clearly tell them
-  whether the current session remains valid.
+- Keep the current session signed in after a successful password change and
+  clearly tell the user that the session remains valid.

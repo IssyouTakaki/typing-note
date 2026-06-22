@@ -134,8 +134,7 @@ const ja = {
     accountVerifyEmail: "メールアドレスを確認",
     accountPasswordTitle: "パスワード",
     accountPasswordNote:
-      "新しいパスワードを設定する前に、現在のパスワードを入力してください。変更後はログアウトされます。",
-    accountCurrentPassword: "現在のパスワード",
+      "新しいパスワードと確認用パスワードを入力してください。変更後もログイン状態は維持されます。",
     accountChangePassword: "パスワードを変更",
     accountBadgeVerified: "確認済み",
     accountBadgePending: "未確認",
@@ -173,11 +172,10 @@ const ja = {
     accountChangingLoginEmail: "ログイン用メールアドレスを変更しています...",
     accountLoginEmailChangedOldRetained:
       "ログイン用メールアドレスを変更しました。以前のログイン用メールアドレスは、2FA と復旧用を無効にしたサブメールとして保持しました。",
-    accountCurrentPasswordRequired: "現在のパスワードを入力してください。",
     accountConfirmChangePassword:
-      "パスワードを変更しますか？変更後はログアウトされます。",
+      "パスワードを変更しますか？変更後もログイン状態は維持されます。",
     accountChangingPassword: "パスワードを変更しています...",
-    accountPasswordChangedSigningOut: "パスワードを変更しました。ログアウトしています...",
+    accountPasswordChanged: "パスワードを変更しました。",
     login2faSecurityEmailFallback: "サブメール",
     login2faTitle: "二段階認証",
     login2faHelp:
@@ -357,8 +355,7 @@ const en: Record<keyof typeof ja, string> = {
     accountVerifyEmail: "Verify email",
     accountPasswordTitle: "Password",
     accountPasswordNote:
-      "Enter your current password before setting a new password. After the change, you will be signed out.",
-    accountCurrentPassword: "Current password",
+      "Enter and confirm your new password. You will remain signed in after the change.",
     accountChangePassword: "Change password",
     accountBadgeVerified: "Verified",
     accountBadgePending: "Pending",
@@ -396,11 +393,10 @@ const en: Record<keyof typeof ja, string> = {
     accountChangingLoginEmail: "Changing login email...",
     accountLoginEmailChangedOldRetained:
       "Login email changed. The old login email was kept as a security email with 2FA and recovery off.",
-    accountCurrentPasswordRequired: "Enter your current password.",
     accountConfirmChangePassword:
-      "Change your password now? You will be signed out after the password is changed.",
+      "Change your password now? You will remain signed in after the change.",
     accountChangingPassword: "Changing password...",
-    accountPasswordChangedSigningOut: "Password changed. Signing out...",
+    accountPasswordChanged: "Password changed.",
     login2faSecurityEmailFallback: "Security email",
     login2faTitle: "Two-step verification",
     login2faHelp:

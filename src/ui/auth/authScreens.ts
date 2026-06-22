@@ -1,6 +1,6 @@
 import {
   beginSignUp,
-  changePasswordWithCurrentPassword,
+  changePassword,
   completeProfileAfterOtp,
   deleteAccountEmail,
   getCurrentLoginEmail,
@@ -1321,7 +1321,6 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const loginEmailChangeOtpInput = qs<HTMLInputElement>("#loginEmailChangeOtpInput");
     const confirmLoginEmailChangeBtn = qs<HTMLButtonElement>("#confirmLoginEmailChangeBtn");
     const passwordChangeMsg = qs<HTMLDivElement>("#passwordChangeMsg");
-    const currentPasswordInput = qs<HTMLInputElement>("#currentPasswordInput");
     const newAccountPasswordInput = qs<HTMLInputElement>("#newAccountPasswordInput");
     const newAccountPasswordConfirmInput = qs<HTMLInputElement>("#newAccountPasswordConfirmInput");
     const changePasswordBtn = qs<HTMLButtonElement>("#changePasswordBtn");
@@ -1387,7 +1386,6 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     verifyAccountEmailOtpBtn.textContent = t("accountVerifyEmail");
     setText("#accountPasswordTitle", t("accountPasswordTitle"));
     setText("#accountPasswordNote", t("accountPasswordNote"));
-    setText("#currentPasswordLabel", t("accountCurrentPassword"));
     setText("#newAccountPasswordLabel", t("newPassword"));
     setText("#newAccountPasswordConfirmLabel", t("newPasswordConfirm"));
     changePasswordBtn.textContent = t("accountChangePassword");
@@ -1701,7 +1699,6 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       verifyAccountEmailOtpBtn.disabled = value;
       loginEmailChangeOtpInput.disabled = value;
       confirmLoginEmailChangeBtn.disabled = value;
-      currentPasswordInput.disabled = value;
       newAccountPasswordInput.disabled = value;
       newAccountPasswordConfirmInput.disabled = value;
       changePasswordBtn.disabled = value;
@@ -1924,7 +1921,6 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     });
 
     const clearPasswordInputs = () => {
-      currentPasswordInput.value = "";
       newAccountPasswordInput.value = "";
       newAccountPasswordConfirmInput.value = "";
     };
@@ -1932,14 +1928,8 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     changePasswordBtn.addEventListener("click", async () => {
       if (busy) return;
 
-      const currentPassword = currentPasswordInput.value;
       const newPassword = newAccountPasswordInput.value;
       const newPasswordConfirm = newAccountPasswordConfirmInput.value;
-
-      if (!currentPassword) {
-        setPasswordChangeMsg(t("accountCurrentPasswordRequired"), "error");
-        return;
-      }
 
       if (!newPassword || !newPasswordConfirm) {
         setPasswordChangeMsg(t("msgNewPasswordRequired"), "error");
@@ -1948,11 +1938,6 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
       if (newPassword !== newPasswordConfirm) {
         setPasswordChangeMsg(t("msgNewPasswordConfirmMismatch"), "error");
-        return;
-      }
-
-      if (currentPassword === newPassword) {
-        setPasswordChangeMsg(t("msgAuthPasswordSameAsOld"), "error");
         return;
       }
 
@@ -1975,18 +1960,10 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         setBusy(true);
         setPasswordChangeMsg(t("accountChangingPassword"), "info");
 
-        await changePasswordWithCurrentPassword({
-          currentPassword,
-          newPassword,
-        });
+        await changePassword(newPassword);
 
         clearPasswordInputs();
-        setPasswordChangeMsg(t("accountPasswordChangedSigningOut"), "info");
-
-        forceSignedOutScreen = "auth";
-        authMode = "normal";
-        await signOut();
-        openAccountScreen("signin", t("msgPasswordUpdatedSignIn"), "info");
+        setPasswordChangeMsg(t("accountPasswordChanged"), "info");
       } catch (error) {
         console.error(error);
         setPasswordChangeMsg(formatAuthErrorMessage(error), "error");
@@ -1995,7 +1972,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       }
     });
 
-    [currentPasswordInput, newAccountPasswordInput, newAccountPasswordConfirmInput].forEach(
+    [newAccountPasswordInput, newAccountPasswordConfirmInput].forEach(
       (input) => {
         input.addEventListener("keydown", (event) => {
           if (event.key !== "Enter") return;

@@ -106,18 +106,10 @@
         <section class="account-section">
             <div id="accountPasswordTitle" class="account-section-title">パスワード</div>
             <div id="accountPasswordNote" class="auth-note">
-                新しいパスワードを設定する前に、現在のパスワードを入力してください。変更後はログアウトされます。
+                新しいパスワードと確認用パスワードを入力してください。変更後もログイン状態は維持されます。
             </div>
 
             <div id="passwordChangeMsg" class="auth-msg" hidden></div>
-
-            <label id="currentPasswordLabel" class="auth-label" for="currentPasswordInput">現在のパスワード</label>
-            <input
-                id="currentPasswordInput"
-                class="auth-input"
-                type="password"
-                autocomplete="current-password"
-            />
 
             <label id="newAccountPasswordLabel" class="auth-label" for="newAccountPasswordInput">新しいパスワード</label>
             <input
