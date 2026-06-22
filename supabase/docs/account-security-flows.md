@@ -29,12 +29,10 @@ Goal: let a signed-in user change password from Account settings.
 
 Agreed behavior:
 
-- The app asks for the current password, even though the Supabase Dashboard
-  setting is disabled.
-- The current password is checked by signing in again with the current Login
-  mail and supplied password.
+- The user does not need to enter the current password.
+- The existing authenticated session authorizes the password update.
 - The new password uses the same client-side policy as sign-up and reset:
   minimum 8 characters, at least one lowercase letter, one uppercase letter,
   and one digit.
-- After the password is updated, the user is signed out and returned to the
-  Sign in screen.
+- After the password is updated, the current session remains signed in and the
+  user stays on the Account settings screen.
