@@ -6,6 +6,7 @@ const ja = {
   authHelp:
     "既存アカウントで Sign in してください。\nアカウント未作成ならアカウント作成から進めます。",
   forgotPassword: "パスワードを再設定",
+  restoreAccountLink: "削除予約中のアカウントを復元",
   backToTypingNote: "TypingNote に戻る",
   terms: "利用規約",
   privacy: "プライバシーポリシー",
@@ -89,6 +90,8 @@ const ja = {
       "メール送信の上限に達しました。しばらく待ってから再度お試しください。",
     msgAuthTooManyRequests:
       "短時間に何度も操作が行われました。しばらく待ってから再度お試しください。",
+    msgAuthUserBanned:
+      "このアカウントは削除予約中のため利用できません。Sign in 画面の「削除予約中のアカウントを復元」から復元してください。",
     msgAuthEmailNotConfirmed:
       "メール確認が完了していません。メールに記載された認証コードまたは確認リンクを確認してください。",
     msgAuthOtpExpired:
@@ -175,6 +178,42 @@ const ja = {
       "パスワードを変更しますか？変更後もログイン状態は維持されます。",
     accountChangingPassword: "パスワードを変更しています...",
     accountPasswordChanged: "パスワードを変更しました。",
+    accountDeletionTitle: "アカウント削除",
+    accountDeletionNote:
+      "現在のパスワードとログインメールに届く確認コードを確認した後、30日間の削除猶予期間が始まります。猶予期間中は利用できませんが、メールで届く復元コードで取り消せます。",
+    accountDeletionPasswordLabel: "現在のパスワード",
+    accountDeletionStart: "削除確認コードを送信",
+    accountDeletionStarting: "パスワードを確認し、確認コードを送信しています...",
+    accountDeletionOtpSent: "削除確認コードを送信しました。",
+    accountDeletionConfirm: "30日後の削除を予約",
+    accountDeletionConfirmPrompt:
+      "アカウントの利用を直ちに停止し、30日後の正式削除を予約しますか？メモは猶予期間中保持され、復元コードで取り消せます。",
+    accountDeletionScheduling: "アカウントの削除を予約しています...",
+    accountDeletionScheduled:
+      "削除を予約しました。復元期限は {date} です。復元コードを登録済みメールへ送信しました。",
+    accountDeletionInvalidPassword: "現在のパスワードが正しくありません。",
+    accountDeletionInvalidOtp: "確認コードが正しくありません。",
+    accountDeletionOtpExpired: "確認コードの有効期限が切れました。もう一度送信してください。",
+    accountDeletionTooManyAttempts: "操作回数が上限に達しました。しばらく待ってからお試しください。",
+    accountDeletionFailed: "アカウント削除手続きを完了できませんでした。",
+    restoreAccountTitle: "アカウントを復元",
+    restoreAccountHelp:
+      "削除予約から30日以内であれば、ログインメールとメールで届いた復元コードを入力して削除予約を取り消せます。復元後は改めて Sign in してください。",
+    restoreAccountEmailLabel: "ログインメール",
+    restoreAccountCodeLabel: "復元コード",
+    restoreAccountSubmit: "アカウントを復元",
+    restoreAccountResend: "復元コードを再送",
+    restoreAccountInputRequired: "ログインメールと復元コードを入力してください。",
+    restoreAccountEmailRequired: "ログインメールを入力してください。",
+    restoreAccountRestoring: "アカウントを復元しています...",
+    restoreAccountRestored: "アカウントを復元しました。通常どおり Sign in してください。",
+    restoreAccountResending: "復元コードの再送を受け付けています...",
+    restoreAccountResendAccepted:
+      "対象アカウントが削除予約中の場合、登録済みメールへ復元コードを送信します。再送は1時間に1回までです。",
+    restoreAccountInvalid: "ログインメールまたは復元コードが正しくありません。",
+    restoreAccountExpired: "30日間の復元期限が終了しています。",
+    restoreAccountTooManyAttempts: "復元コードの確認回数が上限に達しました。1時間後にお試しください。",
+    restoreAccountFailed: "アカウントを復元できませんでした。入力内容または期限を確認してください。",
     login2faSecurityEmailFallback: "サブメール",
     login2faTitle: "二段階認証",
     login2faHelp:
@@ -227,6 +266,7 @@ const en: Record<keyof typeof ja, string> = {
   authHelp:
     "Sign in with your existing account.\nIf you do not have an account yet, create one first.",
   forgotPassword: "Reset password",
+  restoreAccountLink: "Recover an account pending deletion",
   backToTypingNote: "Back to TypingNote",
   terms: "Terms of Service",
   privacy: "Privacy Policy",
@@ -308,6 +348,8 @@ const en: Record<keyof typeof ja, string> = {
       "Email rate limit exceeded. Please wait a while and try again.",
     msgAuthTooManyRequests:
       "Too many requests. Please wait a while and try again.",
+    msgAuthUserBanned:
+      "This account is pending deletion. Use “Recover an account pending deletion” on the Sign in screen.",
     msgAuthEmailNotConfirmed:
       "Email confirmation is not complete. Please check the verification code or confirmation link in your email.",
     msgAuthOtpExpired:
@@ -394,6 +436,42 @@ const en: Record<keyof typeof ja, string> = {
       "Change your password now? You will remain signed in after the change.",
     accountChangingPassword: "Changing password...",
     accountPasswordChanged: "Password changed.",
+    accountDeletionTitle: "Delete account",
+    accountDeletionNote:
+      "After confirming your current password and a code sent to your login email, a 30-day recovery period begins. The account cannot be used during that period, but the recovery code sent by email can cancel deletion.",
+    accountDeletionPasswordLabel: "Current password",
+    accountDeletionStart: "Send deletion verification code",
+    accountDeletionStarting: "Checking your password and sending a verification code...",
+    accountDeletionOtpSent: "Account deletion verification code sent.",
+    accountDeletionConfirm: "Schedule deletion in 30 days",
+    accountDeletionConfirmPrompt:
+      "Disable this account now and schedule permanent deletion in 30 days? Memos are retained during the recovery period and deletion can be canceled with the recovery code.",
+    accountDeletionScheduling: "Scheduling account deletion...",
+    accountDeletionScheduled:
+      "Account deletion scheduled. The recovery deadline is {date}. A recovery code was sent to your registered emails.",
+    accountDeletionInvalidPassword: "The current password is incorrect.",
+    accountDeletionInvalidOtp: "The verification code is incorrect.",
+    accountDeletionOtpExpired: "The verification code has expired. Send a new one.",
+    accountDeletionTooManyAttempts: "The request limit was reached. Please wait and try again.",
+    accountDeletionFailed: "Could not complete the account deletion procedure.",
+    restoreAccountTitle: "Recover account",
+    restoreAccountHelp:
+      "Within 30 days of scheduling deletion, enter your login email and the recovery code sent by email to cancel deletion. Sign in again after recovery.",
+    restoreAccountEmailLabel: "Login email",
+    restoreAccountCodeLabel: "Recovery code",
+    restoreAccountSubmit: "Recover account",
+    restoreAccountResend: "Resend recovery code",
+    restoreAccountInputRequired: "Enter your login email and recovery code.",
+    restoreAccountEmailRequired: "Enter your login email.",
+    restoreAccountRestoring: "Recovering account...",
+    restoreAccountRestored: "Account recovered. Sign in normally to continue.",
+    restoreAccountResending: "Requesting a new recovery code...",
+    restoreAccountResendAccepted:
+      "If the account is pending deletion, a recovery code will be sent to its registered emails. Resending is limited to once per hour.",
+    restoreAccountInvalid: "The login email or recovery code is incorrect.",
+    restoreAccountExpired: "The 30-day account recovery period has ended.",
+    restoreAccountTooManyAttempts: "Too many recovery attempts. Please try again in one hour.",
+    restoreAccountFailed: "Could not recover the account. Check the information and recovery deadline.",
     login2faSecurityEmailFallback: "Security email",
     login2faTitle: "Two-step verification",
     login2faHelp:

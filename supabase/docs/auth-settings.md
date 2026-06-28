@@ -73,12 +73,15 @@ values.
 | OTP_PEPPER | present | Hashes OTP and trusted-browser secrets |
 | RESEND_API_KEY | present | Sends verification emails |
 | AUTH_MAIL_FROM | present | From address for account-security emails |
+| ACCOUNT_RECOVERY_PEPPER | required for account deletion | Hashes 30-day recovery codes |
 | PASSWORD_RESET_PAGE_URL | present | Password reset landing URL |
 | SEND_EMAIL_HOOK_SECRET | present | Send-email hook validation secret |
 
 Functions visible in the dashboard:
 
 - `account-security`
+- `account-deletion`
+- `purge-account-deletions`
 - `begin-signup`
 - `request-password-reset`
 - `send-auth-email`
@@ -98,6 +101,8 @@ Tables expected by the current TypingNote code:
 | public.account_emails | User-owned security email addresses | Select/delete own rows |
 | public.account_email_otp_challenges | OTP challenge hashes and rate-limit data | No direct client access |
 | public.account_trusted_browsers | Trusted browser hashes for login 2FA | No direct client access |
+| public.account_deletion_requests | Pending 30-day deletion state | No direct client access |
+| public.account_deletion_recovery_codes | Hashed recovery codes | No direct client access |
 
 ## Login Mail Change Design Notes
 

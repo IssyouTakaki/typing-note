@@ -17,6 +17,7 @@ import {
   mountForgotPasswordUI,
   mountLogin2faUI,
   mountPrivacyUI,
+  mountRestoreAccountUI,
   mountResetPasswordUI,
   mountSignUpOtpUI,
   mountSignUpUI,
@@ -74,6 +75,11 @@ async function rerender(message = "") {
 
   if (getAppScreen() === "accountSettings") {
     mountAccountSettingsUI(app, message);
+    return;
+  }
+
+  if (getAppScreen() === "restoreAccount") {
+    mountRestoreAccountUI(app, message);
     return;
   }
 

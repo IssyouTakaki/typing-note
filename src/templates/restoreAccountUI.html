@@ -1,0 +1,33 @@
+<div class="layout auth-layout">
+    <form id="restoreAccountForm" class="auth-card" autocomplete="off">
+        <div id="restoreAccountTitle" class="auth-title">アカウントを復元</div>
+
+        <div id="restoreAccountHelp" class="auth-help">
+            削除予約から30日以内であれば、ログインメールとメールで届いた復元コードを入力して復元できます。
+        </div>
+
+        <div id="restoreAccountMsg" class="auth-msg" hidden></div>
+
+        <label id="restoreAccountEmailLabel" class="auth-label" for="restoreAccountEmailInput">Email</label>
+        <input id="restoreAccountEmailInput" class="auth-input" type="email" autocomplete="email" />
+
+        <label id="restoreAccountCodeLabel" class="auth-label" for="restoreAccountCodeInput">復元コード</label>
+        <input
+            id="restoreAccountCodeInput"
+            class="auth-input account-recovery-code-input"
+            type="text"
+            autocomplete="one-time-code"
+            spellcheck="false"
+        />
+
+        <button id="restoreAccountSubmitBtn" class="auth-btn auth-btn-primary account-full-btn" type="submit">
+            アカウントを復元
+        </button>
+        <button id="resendAccountRecoveryBtn" class="auth-btn auth-btn-secondary account-full-btn" type="button">
+            復元コードを再送
+        </button>
+        <button id="restoreAccountBackBtn" class="auth-btn auth-btn-link" type="button">
+            Sign in に戻る
+        </button>
+    </form>
+</div>

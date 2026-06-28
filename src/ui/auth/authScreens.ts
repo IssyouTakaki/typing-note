@@ -2,23 +2,28 @@ import {
   beginSignUp,
   changePassword,
   completeProfileAfterOtp,
+  confirmAccountDeletion,
   deleteAccountEmail,
   getCurrentLoginEmail,
   getSession,
   listAccountEmails,
   promoteAccountEmailToLogin,
   requestPasswordResetEmail,
+  resendAccountRecoveryCode,
   resendSignUpOtp,
+  restoreDeletedAccount,
   sendLoginEmailChangeOtp,
   sendVerifyAccountEmailOtp,
   signIn,
   signOut,
+  startAccountDeletion,
   startLogin2fa,
   updateLocaleSettings,
   verifyAccountEmailOtp,
   verifyEmailOtp,
   verifyLogin2fa,
   type AccountEmail,
+  AccountDeletionError,
   type PendingSignUpDraft,
 } from "../../repos/authRepo";
 import { supabase } from "../../lib/supabaseClient";
@@ -49,6 +54,7 @@ import { qs } from "../../utils/dom";
   import privacyEnHtml from "../../templates/privacy.en.html?raw";
   import forgotPasswordUIHtml from "../../templates/forgotPasswordUI.html?raw";
   import accountSettingsUIHtml from "../../templates/accountSettingsUI.html?raw";
+  import restoreAccountUIHtml from "../../templates/restoreAccountUI.html?raw";
   import adminAnalyticsUIHtml from "../../templates/adminAnalyticsUI.html?raw";
   
   type Rerender = (message?: string) => Promise<void>;
@@ -254,6 +260,14 @@ import { qs } from "../../utils/dom";
     }
 
     if (
+      haystack.includes("user_banned") ||
+      haystack.includes("user is banned") ||
+      haystack.includes("account is banned")
+    ) {
+      return t("msgAuthUserBanned");
+    }
+
+    if (
       haystack.includes("invalid_credentials") ||
       haystack.includes("invalid login credentials")
     ) {
@@ -342,6 +356,45 @@ import { qs } from "../../utils/dom";
     return formatAuthErrorMessage(error) || t("msgEmailSendFailed");
   }
 
+  function formatAccountDeletionError(
+    error: unknown,
+    context: "delete" | "restore"
+  ): string {
+    if (!(error instanceof AccountDeletionError)) {
+      return context === "delete"
+        ? t("accountDeletionFailed")
+        : t("restoreAccountFailed");
+    }
+
+    switch (error.code) {
+      case "invalid_password":
+        return t("accountDeletionInvalidPassword");
+      case "invalid_otp":
+      case "invalid_otp_format":
+      case "otp_not_found":
+      case "otp_already_used":
+        return t("accountDeletionInvalidOtp");
+      case "otp_expired":
+        return t("accountDeletionOtpExpired");
+      case "too_many_attempts":
+      case "too_many_otp_requests":
+      case "recovery_locked":
+        return context === "delete"
+          ? t("accountDeletionTooManyAttempts")
+          : t("restoreAccountTooManyAttempts");
+      case "invalid_recovery_code":
+      case "invalid_recovery_input":
+        return t("restoreAccountInvalid");
+      case "recovery_expired":
+      case "recovery_unavailable":
+        return t("restoreAccountExpired");
+      default:
+        return context === "delete"
+          ? t("accountDeletionFailed")
+          : t("restoreAccountFailed");
+    }
+  }
+
   function normalizeEmailForCompare(email: string) {
     return email.trim().toLowerCase();
   }
@@ -352,7 +405,7 @@ import { qs } from "../../utils/dom";
   const PENDING_SIGNUP_EMAIL_STORAGE_KEY = "typingnote.pending-signup-email";
   
   const PASSWORD_RESET_EMAIL_STORAGE_KEY = "typingnote.password-reset-email";
-  let forceSignedOutScreen: "memo" | "auth" | null = null;
+  let forceSignedOutScreen: "memo" | "auth" | "restoreAccount" | null = null;
   
   function savePasswordResetEmail(email: string) {
     if (!canUseLocalStorage()) return;
@@ -378,6 +431,7 @@ import { qs } from "../../utils/dom";
   | "signupOtp"
   | "login2fa"
   | "forgotPassword"
+  | "restoreAccount"
   | "terms"
   | "privacy"
   | "accountSettings"
@@ -405,6 +459,12 @@ import { qs } from "../../utils/dom";
   let pendingLoginEmailChange:
   | {
       accountEmailId: string;
+      maskedEmail: string;
+    }
+  | null = null;
+
+  let pendingAccountDeletionOtp:
+  | {
       maskedEmail: string;
     }
   | null = null;
@@ -452,6 +512,15 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
   ) {
     authFlashKind = kind;
     appScreen = "accountSettings";
+    rerender(message).catch(console.error);
+  }
+
+  export function openRestoreAccountScreen(
+    message = "",
+    kind: "info" | "error" = "info"
+  ) {
+    authFlashKind = kind;
+    appScreen = "restoreAccount";
     rerender(message).catch(console.error);
   }
 
@@ -1055,6 +1124,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const signupBtn = qs<HTMLButtonElement>("#signupBtn");
     const signinBtn = qs<HTMLButtonElement>("#signinBtn");
     const forgotBtn = qs<HTMLButtonElement>("#forgotBtn");
+    const restoreAccountBtn = qs<HTMLButtonElement>("#restoreAccountBtn");
     const backToTopBtn = qs<HTMLButtonElement>("#backToTopBtn");
     const openTermsFromAuthBtn = qs<HTMLButtonElement>("#openTermsFromAuthBtn");
     const openPrivacyFromAuthBtn = qs<HTMLButtonElement>("#openPrivacyFromAuthBtn");
@@ -1062,6 +1132,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     setMultilineText("#authHelp", t("authHelp"));
     signupBtn.textContent = t("createAccount");
     forgotBtn.textContent = t("forgotPassword");
+    restoreAccountBtn.textContent = t("restoreAccountLink");
     backToTopBtn.textContent = t("backToTypingNote");
     openTermsFromAuthBtn.textContent = t("terms");
     openPrivacyFromAuthBtn.textContent = t("privacy");
@@ -1091,6 +1162,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       signupBtn.disabled = v;
       signinBtn.disabled = v;
       forgotBtn.disabled = v;
+      restoreAccountBtn.disabled = v;
       backToTopBtn.disabled = v;
     };
   
@@ -1172,6 +1244,13 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       if (email) savePasswordResetEmail(email);
     
       openForgotPasswordScreen();
+    });
+
+    restoreAccountBtn.addEventListener("click", () => {
+      if (busy) return;
+      const email = emailEl.value.trim();
+      if (email) savePasswordResetEmail(email);
+      openRestoreAccountScreen();
     });
   
     backToTopBtn.addEventListener("click", async () => {
@@ -1324,6 +1403,13 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const newAccountPasswordInput = qs<HTMLInputElement>("#newAccountPasswordInput");
     const newAccountPasswordConfirmInput = qs<HTMLInputElement>("#newAccountPasswordConfirmInput");
     const changePasswordBtn = qs<HTMLButtonElement>("#changePasswordBtn");
+    const accountDeletionMsg = qs<HTMLDivElement>("#accountDeletionMsg");
+    const accountDeletionPasswordInput = qs<HTMLInputElement>("#accountDeletionPasswordInput");
+    const startAccountDeletionBtn = qs<HTMLButtonElement>("#startAccountDeletionBtn");
+    const accountDeletionOtpArea = qs<HTMLDivElement>("#accountDeletionOtpArea");
+    const accountDeletionOtpTarget = qs<HTMLElement>("#accountDeletionOtpTarget");
+    const accountDeletionOtpInput = qs<HTMLInputElement>("#accountDeletionOtpInput");
+    const confirmAccountDeletionBtn = qs<HTMLButtonElement>("#confirmAccountDeletionBtn");
 
     const restoreAccountEmailOtpArea = () => {
       if (!pendingAccountEmailVerification) {
@@ -1365,6 +1451,24 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       loginEmailChangeOtpInput.value = "";
     };
 
+    const restoreAccountDeletionOtpArea = () => {
+      if (!pendingAccountDeletionOtp) {
+        accountDeletionOtpArea.hidden = true;
+        accountDeletionOtpTarget.textContent = "";
+        accountDeletionOtpInput.value = "";
+        return;
+      }
+      accountDeletionOtpArea.hidden = false;
+      accountDeletionOtpTarget.textContent = pendingAccountDeletionOtp.maskedEmail;
+    };
+
+    const clearAccountDeletionOtpState = () => {
+      pendingAccountDeletionOtp = null;
+      accountDeletionOtpArea.hidden = true;
+      accountDeletionOtpTarget.textContent = "";
+      accountDeletionOtpInput.value = "";
+    };
+
     setText("#accountSettingsTitle", t("accountSettingsTitle"));
     setMultilineText("#accountSettingsHelp", t("accountSettingsHelp"));
     setText("#accountLanguageLabel", t("languageLabel"));
@@ -1388,6 +1492,13 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     setText("#newAccountPasswordLabel", t("newPassword"));
     setText("#newAccountPasswordConfirmLabel", t("newPasswordConfirm"));
     changePasswordBtn.textContent = t("accountChangePassword");
+    setText("#accountDeletionTitle", t("accountDeletionTitle"));
+    setMultilineText("#accountDeletionNote", t("accountDeletionNote"));
+    setText("#accountDeletionPasswordLabel", t("accountDeletionPasswordLabel"));
+    startAccountDeletionBtn.textContent = t("accountDeletionStart");
+    setText("#accountDeletionOtpPrefix", t("accountOtpSentPrefix"));
+    setText("#accountDeletionOtpLabel", t("accountVerificationCodeLabel"));
+    confirmAccountDeletionBtn.textContent = t("accountDeletionConfirm");
     adminAnalyticsBtn.textContent = t("adminAnalyticsButton");
     backBtn.textContent = t("backToTypingNote");
 
@@ -1449,6 +1560,20 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       passwordChangeMsg.hidden = false;
       passwordChangeMsg.textContent = text;
       passwordChangeMsg.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
+    };
+
+    const setAccountDeletionMsg = (
+      text: string,
+      kind: "info" | "error" = "error"
+    ) => {
+      if (!text) {
+        accountDeletionMsg.hidden = true;
+        accountDeletionMsg.textContent = "";
+        return;
+      }
+      accountDeletionMsg.hidden = false;
+      accountDeletionMsg.textContent = text;
+      accountDeletionMsg.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
     };
      
     const renderAccountEmailList = (emails: AccountEmail[]) => {
@@ -1669,6 +1794,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     
     restoreAccountEmailOtpArea();
     restoreLoginEmailChangeOtpArea();
+    restoreAccountDeletionOtpArea();
     
     void refreshAccountEmails().catch((error) => {
       console.error(error);
@@ -1699,6 +1825,10 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       newAccountPasswordInput.disabled = value;
       newAccountPasswordConfirmInput.disabled = value;
       changePasswordBtn.disabled = value;
+      accountDeletionPasswordInput.disabled = value;
+      startAccountDeletionBtn.disabled = value;
+      accountDeletionOtpInput.disabled = value;
+      confirmAccountDeletionBtn.disabled = value;
     
       accountEmailListEl
         .querySelectorAll<HTMLButtonElement>(
@@ -1981,6 +2111,99 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       }
     );
 
+    startAccountDeletionBtn.addEventListener("click", async () => {
+      if (busy) return;
+      const password = accountDeletionPasswordInput.value;
+      if (!password) {
+        setAccountDeletionMsg(t("msgPasswordRequired"), "error");
+        return;
+      }
+
+      try {
+        setBusy(true);
+        setAccountDeletionMsg(t("accountDeletionStarting"), "info");
+        clearAccountDeletionOtpState();
+
+        const result = await startAccountDeletion({
+          password,
+          resolvedLocale: getI18nState().resolvedLocale,
+        });
+        accountDeletionPasswordInput.value = "";
+        pendingAccountDeletionOtp = { maskedEmail: result.maskedEmail };
+        restoreAccountDeletionOtpArea();
+        setAccountDeletionMsg(t("accountDeletionOtpSent"), "info");
+        accountDeletionOtpArea.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+        accountDeletionOtpInput.focus();
+      } catch (error) {
+        console.error(error);
+        setAccountDeletionMsg(formatAccountDeletionError(error, "delete"), "error");
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    accountDeletionOtpInput.addEventListener("input", () => {
+      accountDeletionOtpInput.value = accountDeletionOtpInput.value
+        .replace(/\D+/g, "")
+        .slice(0, 6);
+    });
+
+    accountDeletionOtpInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      confirmAccountDeletionBtn.click();
+    });
+
+    confirmAccountDeletionBtn.addEventListener("click", async () => {
+      if (busy) return;
+      if (!pendingAccountDeletionOtp) {
+        setAccountDeletionMsg(t("accountSendCodeFirst"), "error");
+        return;
+      }
+
+      const otp = accountDeletionOtpInput.value.trim();
+      if (!/^\d{6}$/.test(otp)) {
+        setAccountDeletionMsg(t("accountCodeMustBeSixDigits"), "error");
+        return;
+      }
+
+      const ok = await keyConfirmAccount(
+        t("accountDeletionConfirmPrompt"),
+        t("confirmHintDeleteCancel")
+      );
+      if (!ok) return;
+
+      try {
+        setBusy(true);
+        setAccountDeletionMsg(t("accountDeletionScheduling"), "info");
+        const result = await confirmAccountDeletion({
+          otp,
+          resolvedLocale: getI18nState().resolvedLocale,
+        });
+        clearAccountDeletionOtpState();
+
+        const locale = getI18nState().resolvedLocale === "ja" ? "ja-JP" : "en-US";
+        const deadline = new Date(result.scheduledDeletionAt).toLocaleString(locale);
+        const scheduledMessage = formatI18n(t("accountDeletionScheduled"), {
+          date: deadline,
+        });
+
+        forceSignedOutScreen = "restoreAccount";
+        authFlashKind = "info";
+        appScreen = "restoreAccount";
+        await signOut();
+        await rerender(scheduledMessage);
+      } catch (error) {
+        console.error(error);
+        setAccountDeletionMsg(formatAccountDeletionError(error, "delete"), "error");
+      } finally {
+        setBusy(false);
+      }
+    });
+
     selectEl.addEventListener("change", async () => {
       if (busy || accountSettingsLocaleSaving) return;
 
@@ -2033,6 +2256,114 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     adminAnalyticsBtn.addEventListener("click", () => {
       if (busy) return;
       openAdminAnalyticsScreen();
+    });
+  }
+
+  export function mountRestoreAccountUI(app: HTMLDivElement, message = "") {
+    resetScreenHandlers();
+    app.innerHTML = restoreAccountUIHtml;
+
+    const form = qs<HTMLFormElement>("#restoreAccountForm");
+    const msgEl = qs<HTMLDivElement>("#restoreAccountMsg");
+    const emailInput = qs<HTMLInputElement>("#restoreAccountEmailInput");
+    const codeInput = qs<HTMLInputElement>("#restoreAccountCodeInput");
+    const submitBtn = qs<HTMLButtonElement>("#restoreAccountSubmitBtn");
+    const resendBtn = qs<HTMLButtonElement>("#resendAccountRecoveryBtn");
+    const backBtn = qs<HTMLButtonElement>("#restoreAccountBackBtn");
+
+    setText("#restoreAccountTitle", t("restoreAccountTitle"));
+    setMultilineText("#restoreAccountHelp", t("restoreAccountHelp"));
+    setText("#restoreAccountEmailLabel", t("restoreAccountEmailLabel"));
+    setText("#restoreAccountCodeLabel", t("restoreAccountCodeLabel"));
+    submitBtn.textContent = t("restoreAccountSubmit");
+    resendBtn.textContent = t("restoreAccountResend");
+    backBtn.textContent = t("backToSignIn");
+
+    const savedEmail = loadPasswordResetEmail();
+    if (savedEmail) emailInput.value = savedEmail;
+
+    const setMsg = (text: string, kind: "info" | "error" = "error") => {
+      if (!text) {
+        msgEl.hidden = true;
+        msgEl.textContent = "";
+        return;
+      }
+      msgEl.hidden = false;
+      msgEl.textContent = text;
+      msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
+    };
+
+    if (message) setMsg(message, authFlashKind);
+    else setMsg("");
+
+    let busy = false;
+    const setBusy = (value: boolean) => {
+      busy = value;
+      emailInput.disabled = value;
+      codeInput.disabled = value;
+      submitBtn.disabled = value;
+      resendBtn.disabled = value;
+      backBtn.disabled = value;
+    };
+
+    codeInput.addEventListener("input", () => {
+      codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (busy) return;
+
+      const email = emailInput.value.trim();
+      const recoveryCode = codeInput.value.trim();
+      if (!email || !recoveryCode) {
+        setMsg(t("restoreAccountInputRequired"), "error");
+        return;
+      }
+
+      try {
+        setBusy(true);
+        setMsg(t("restoreAccountRestoring"), "info");
+        await restoreDeletedAccount({ email, recoveryCode });
+        savePasswordResetEmail(email);
+        codeInput.value = "";
+        setMsg(t("restoreAccountRestored"), "info");
+      } catch (error) {
+        console.error(error);
+        setMsg(formatAccountDeletionError(error, "restore"), "error");
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    resendBtn.addEventListener("click", async () => {
+      if (busy) return;
+      const email = emailInput.value.trim();
+      if (!email) {
+        setMsg(t("restoreAccountEmailRequired"), "error");
+        return;
+      }
+
+      try {
+        setBusy(true);
+        setMsg(t("restoreAccountResending"), "info");
+        savePasswordResetEmail(email);
+        await resendAccountRecoveryCode({
+          email,
+          resolvedLocale: getI18nState().resolvedLocale,
+        });
+        setMsg(t("restoreAccountResendAccepted"), "info");
+      } catch (error) {
+        console.error(error);
+        setMsg(formatAccountDeletionError(error, "restore"), "error");
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    backBtn.addEventListener("click", () => {
+      if (busy) return;
+      openAccountScreen("signin");
     });
   }
 

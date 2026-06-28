@@ -36,3 +36,30 @@ Agreed behavior:
   and one digit.
 - After the password is updated, the current session remains signed in and the
   user stays on the Account settings screen.
+
+## Recoverable Account Deletion
+
+Goal: require strong confirmation, block the account immediately, and allow
+recovery for 30 days before permanent deletion.
+
+Agreed behavior:
+
+- The signed-in user must enter the current password.
+- TypingNote sends a 6-digit, 10-minute OTP to the current Login mail.
+- Only after the OTP and final confirmation are accepted does the 30-day grace
+  period begin.
+- The Auth user and all owned data remain present during the grace period.
+- The user is banned, refresh tokens are revoked, and RLS plus Edge Functions
+  reject normal access while deletion is pending.
+- A high-entropy recovery code is hashed before storage. The plaintext code is
+  sent to the Login mail and every verified Security mail with
+  `use_for_recovery = true`.
+- Recovery requires the Login mail and a valid recovery code before
+  `scheduled_deletion_at`. Recovery lifts the ban, removes the deletion request,
+  and requires a normal sign-in afterward.
+- Recovery-code resend is generic to prevent account enumeration, limited to
+  once per hour and five codes for one deletion request.
+- A scheduled purge function permanently deletes due Auth users. Owned rows
+  with `on delete cascade` are deleted, while `app_events.user_id` becomes null.
+- PostHog data, Resend logs, delivered feedback email, and provider backups are
+  outside this automated deletion flow.
