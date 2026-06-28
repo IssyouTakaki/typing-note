@@ -74,6 +74,7 @@ values.
 | RESEND_API_KEY | present | Sends verification emails |
 | AUTH_MAIL_FROM | present | From address for account-security emails |
 | ACCOUNT_RECOVERY_PEPPER | required for account deletion | Hashes 30-day recovery codes |
+| PURGE_ACCOUNT_DELETIONS_TOKEN | required for account deletion purge | Authorizes scheduled purge function calls |
 | PASSWORD_RESET_PAGE_URL | present | Password reset landing URL |
 | SEND_EMAIL_HOOK_SECRET | present | Send-email hook validation secret |
 

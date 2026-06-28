@@ -61,5 +61,7 @@ Agreed behavior:
   once per hour and five codes for one deletion request.
 - A scheduled purge function permanently deletes due Auth users. Owned rows
   with `on delete cascade` are deleted, while `app_events.user_id` becomes null.
+- After permanent deletion succeeds, TypingNote sends a deletion-completed email
+  to the stored Login mail. Notification failure does not roll back deletion.
 - PostHog data, Resend logs, delivered feedback email, and provider backups are
   outside this automated deletion flow.
