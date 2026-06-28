@@ -130,6 +130,53 @@
             </button>
         </section>
 
+        <section class="account-section account-danger-section">
+            <div id="accountDeletionTitle" class="account-section-title">アカウント削除</div>
+            <div id="accountDeletionNote" class="auth-note">
+                パスワードとメール確認コードを確認した後、30日間の削除猶予期間が始まります。
+            </div>
+
+            <div id="accountDeletionMsg" class="auth-msg" hidden></div>
+
+            <label id="accountDeletionPasswordLabel" class="auth-label" for="accountDeletionPasswordInput">
+                現在のパスワード
+            </label>
+            <input
+                id="accountDeletionPasswordInput"
+                class="auth-input"
+                type="password"
+                autocomplete="current-password"
+            />
+
+            <button id="startAccountDeletionBtn" class="auth-btn auth-btn-danger account-full-btn" type="button">
+                削除確認コードを送信
+            </button>
+
+            <div id="accountDeletionOtpArea" class="account-otp-area" hidden>
+                <div class="auth-note">
+                    <span id="accountDeletionOtpPrefix">確認コードの送信先: </span>
+                    <strong id="accountDeletionOtpTarget"></strong>
+                </div>
+
+                <label id="accountDeletionOtpLabel" class="auth-label" for="accountDeletionOtpInput">
+                    確認コード
+                </label>
+                <input
+                    id="accountDeletionOtpInput"
+                    class="auth-input auth-otp-input"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="6"
+                    autocomplete="one-time-code"
+                    placeholder="000000"
+                />
+
+                <button id="confirmAccountDeletionBtn" class="auth-btn auth-btn-danger account-full-btn" type="button">
+                    30日後の削除を予約
+                </button>
+            </div>
+        </section>
+
         <div class="auth-actions auth-actions-stack-mobile">
             <button id="adminAnalyticsBtn" class="auth-btn auth-btn-secondary" type="button" hidden>
                 管理

@@ -130,6 +130,25 @@ async function getAuthenticatedUser(req: Request): Promise<AuthUser> {
     throw new Response("Unauthorized", { status: 401 });
   }
 
+  const admin = createAdminClient();
+  const { data: deletionRequest, error: deletionRequestError } = await admin
+    .from("account_deletion_requests")
+    .select("id")
+    .eq("user_id", data.user.id)
+    .in("status", ["pending", "restoring", "purging"])
+    .maybeSingle();
+
+  if (deletionRequestError) throw deletionRequestError;
+  if (deletionRequest) {
+    throw json(
+      {
+        error: "account_pending_deletion",
+        message: "Account access is disabled while deletion is pending.",
+      },
+      423
+    );
+  }
+
   return {
     id: data.user.id,
     email: data.user.email ?? undefined,

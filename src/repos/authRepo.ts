@@ -516,3 +516,101 @@ export type SendVerifyAccountEmailOtpResult =
   
     return data as RequestPasswordResetResult;
   }
+
+export class AccountDeletionError extends Error {
+  readonly code: string | null;
+  readonly status: number | null;
+
+  constructor(
+    message: string,
+    code: string | null = null,
+    status: number | null = null
+  ) {
+    super(message);
+    this.name = "AccountDeletionError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+async function invokeAccountDeletion<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke("account-deletion", {
+    body,
+  });
+
+  if (!error) return data as T;
+
+  const context = (error as { context?: unknown }).context;
+  let code: string | null = null;
+  let message = error.message || "Account deletion request failed.";
+  let status: number | null = null;
+
+  if (context instanceof Response) {
+    status = context.status;
+    const payload = await context
+      .clone()
+      .json()
+      .catch(() => null) as { error?: unknown; message?: unknown } | null;
+    if (payload?.error) code = String(payload.error);
+    if (payload?.message) message = String(payload.message);
+  }
+
+  throw new AccountDeletionError(message, code, status);
+}
+
+export type StartAccountDeletionResult = {
+  status: "otp_sent";
+  maskedEmail: string;
+  expiresInMinutes: number;
+};
+
+export type ConfirmAccountDeletionResult = {
+  status: "scheduled";
+  scheduledDeletionAt: string;
+  recoveryCodeDeliveredTo: number;
+  recoveryDestinationCount: number;
+};
+
+export async function startAccountDeletion(args: {
+  password: string;
+  resolvedLocale?: ResolvedLocale;
+}): Promise<StartAccountDeletionResult> {
+  return invokeAccountDeletion<StartAccountDeletionResult>({
+    action: "start_deletion",
+    password: args.password,
+    resolvedLocale: args.resolvedLocale,
+  });
+}
+
+export async function confirmAccountDeletion(args: {
+  otp: string;
+  resolvedLocale?: ResolvedLocale;
+}): Promise<ConfirmAccountDeletionResult> {
+  return invokeAccountDeletion<ConfirmAccountDeletionResult>({
+    action: "confirm_deletion",
+    otp: args.otp.trim(),
+    resolvedLocale: args.resolvedLocale,
+  });
+}
+
+export async function restoreDeletedAccount(args: {
+  email: string;
+  recoveryCode: string;
+}): Promise<{ status: "restored" }> {
+  return invokeAccountDeletion<{ status: "restored" }>({
+    action: "restore_account",
+    email: args.email.trim().toLowerCase(),
+    recoveryCode: args.recoveryCode.trim(),
+  });
+}
+
+export async function resendAccountRecoveryCode(args: {
+  email: string;
+  resolvedLocale?: ResolvedLocale;
+}): Promise<{ status: "accepted" }> {
+  return invokeAccountDeletion<{ status: "accepted" }>({
+    action: "resend_recovery_code",
+    email: args.email.trim().toLowerCase(),
+    resolvedLocale: args.resolvedLocale,
+  });
+}
