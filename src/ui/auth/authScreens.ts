@@ -403,9 +403,21 @@ import { qs } from "../../utils/dom";
   const PRIVACY_VERSION = "v1";
   const PENDING_SIGNUP_STORAGE_KEY = "typingnote.pending-signup";
   const PENDING_SIGNUP_EMAIL_STORAGE_KEY = "typingnote.pending-signup-email";
+
+  type SignUpFormDraft = {
+    displayName: string;
+    familyName: string;
+    givenName: string;
+    email: string;
+    password: string;
+    passwordConfirm: string;
+    agreeTerms: boolean;
+    agreePrivacy: boolean;
+  };
   
   const PASSWORD_RESET_EMAIL_STORAGE_KEY = "typingnote.password-reset-email";
   let forceSignedOutScreen: "memo" | "auth" | "restoreAccount" | null = null;
+  let signUpFormDraft: SignUpFormDraft | null = null;
   
   function savePasswordResetEmail(email: string) {
     if (!canUseLocalStorage()) return;
@@ -725,6 +737,34 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     submitBtn.textContent = t("proceedToEmailVerification");
     backBtn.textContent = t("backToSignIn");
     topBtn.textContent = t("backToTypingNote");
+
+    const restoreSignUpFormDraft = () => {
+      if (!signUpFormDraft) return;
+
+      displayNameEl.value = signUpFormDraft.displayName;
+      familyNameEl.value = signUpFormDraft.familyName;
+      givenNameEl.value = signUpFormDraft.givenName;
+      emailEl.value = signUpFormDraft.email;
+      passEl.value = signUpFormDraft.password;
+      pass2El.value = signUpFormDraft.passwordConfirm;
+      agreeTermsEl.checked = signUpFormDraft.agreeTerms;
+      agreePrivacyEl.checked = signUpFormDraft.agreePrivacy;
+    };
+
+    const captureSignUpFormDraft = () => {
+      signUpFormDraft = {
+        displayName: displayNameEl.value,
+        familyName: familyNameEl.value,
+        givenName: givenNameEl.value,
+        email: emailEl.value,
+        password: passEl.value,
+        passwordConfirm: pass2El.value,
+        agreeTerms: agreeTermsEl.checked,
+        agreePrivacy: agreePrivacyEl.checked,
+      };
+    };
+
+    restoreSignUpFormDraft();
     
     const setMsg = (t: string, kind: "info" | "error" = "error") => {
       if (!t) {
@@ -826,6 +866,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
         }
 
         savePendingSignUpDraft(nextDraft);
+        signUpFormDraft = null;
         openSignupOtpScreen(t("msgSignupEmailCheck"), "info");
         return;
       } catch (err: any) {
@@ -837,19 +878,23 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     });
 
     backBtn.addEventListener("click", async () => {
+      signUpFormDraft = null;
       openAccountScreen("signin");
     });
 
     topBtn.addEventListener("click", async () => {
+      signUpFormDraft = null;
       appScreen = "memo";
       await rerender();
     });
 
     openTermsBtn.addEventListener("click", () => {
+      captureSignUpFormDraft();
       openLegalScreen("terms", "signup");
     });
 
     openPrivacyBtn.addEventListener("click", () => {
+      captureSignUpFormDraft();
       openLegalScreen("privacy", "signup");
     });
   }
