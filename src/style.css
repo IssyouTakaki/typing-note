@@ -837,9 +837,36 @@ body {
   margin-top: 12px;
 }
 
-/* Sign up: password policy note と同意チェックボックスの間隔 */
+/* Sign up: keep password policy separated from the email flow action. */
 #signupPasswordNote{
   margin-bottom: 16px;
+}
+
+.auth-section{
+  border-top: 1px solid #eef0f3;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.auth-section-first{
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.auth-section-title{
+  color: #111;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.auth-section-note{
+  color: #666;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 10px;
 }
 
 .auth-msg{

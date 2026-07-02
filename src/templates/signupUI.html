@@ -8,53 +8,74 @@
 
         <div id="signupMsg" class="auth-msg" hidden></div>
 
-        <label class="auth-label">Display name</label>
-        <input id="signupDisplayName" class="auth-input" type="text" autocomplete="nickname" placeholder="必須" />
-        
-        <div class="auth-grid auth-grid-2">
-            <div>
-                <label class="auth-label">Family name</label>
-                <input id="signupFamilyName" class="auth-input" type="text" autocomplete="family-name" placeholder="任意" />
+        <section class="auth-section auth-section-first" aria-labelledby="signupProfileTitle">
+            <div id="signupProfileTitle" class="auth-section-title">TypingNote profile</div>
+            <div id="signupProfileHelp" class="auth-section-note">
+                Display name は TypingNote 内で表示される名前です。
             </div>
-            <div>
-                <label class="auth-label">Given name</label>
-                <input id="signupGivenName" class="auth-input" type="text" autocomplete="given-name" placeholder="任意" />
+
+            <label class="auth-label">Display name</label>
+            <input id="signupDisplayName" class="auth-input" type="text" autocomplete="nickname" placeholder="必須" />
+
+            <div class="auth-grid auth-grid-2">
+                <div>
+                    <label class="auth-label">Family name</label>
+                    <input id="signupFamilyName" class="auth-input" type="text" autocomplete="family-name" placeholder="任意" />
+                </div>
+                <div>
+                    <label class="auth-label">Given name</label>
+                    <input id="signupGivenName" class="auth-input" type="text" autocomplete="given-name" placeholder="任意" />
+                </div>
             </div>
-        </div>
-        
-        <label class="auth-label">Email</label>
-        <input id="signupEmail" class="auth-input" type="email" autocomplete="email" placeholder="必須" />
-        
-        <label class="auth-label">Password</label>
-        <input id="signupPassword" class="auth-input" type="password" autocomplete="new-password" placeholder="必須" />
-        
-        <label class="auth-label">Confirm password</label>
-        <input id="signupPassword2" class="auth-input" type="password" autocomplete="new-password" placeholder="必須" />
-        
-        <div id="signupPasswordNote" class="auth-note">
-            Password は 8 文字以上で、英大文字・英小文字・数字を各 1 文字以上含めてください。
-        </div>
 
-        <label class="auth-check">
-            <input id="agreeTerms" type="checkbox" />
-            <span>
-                <button id="openTermsBtn" class="auth-inline-link" type="button">利用規約</button>
-                <span id="agreeTermsText">に同意する</span>
-            </span>
-        </label>
-        
-        <label class="auth-check">
-            <input id="agreePrivacy" type="checkbox" />
-            <span>
-                <button id="openPrivacyBtn" class="auth-inline-link" type="button">プライバシーポリシー</button>
-                <span id="agreePrivacyText">に同意する</span>
-            </span>
-        </label>
+            <label class="auth-check">
+                <input id="agreeTerms" type="checkbox" />
+                <span>
+                    <button id="openTermsBtn" class="auth-inline-link" type="button">利用規約</button>
+                    <span id="agreeTermsText">に同意する</span>
+                </span>
+            </label>
 
-        <div class="auth-provider-actions">
-            <button id="googleSignupBtn" class="auth-btn auth-btn-provider" type="button"></button>
-            <button id="appleSignupBtn" class="auth-btn auth-btn-provider" type="button"></button>
-        </div>
+            <label class="auth-check">
+                <input id="agreePrivacy" type="checkbox" />
+                <span>
+                    <button id="openPrivacyBtn" class="auth-inline-link" type="button">プライバシーポリシー</button>
+                    <span id="agreePrivacyText">に同意する</span>
+                </span>
+            </label>
+        </section>
+
+        <section class="auth-section" aria-labelledby="signupOAuthTitle">
+            <div id="signupOAuthTitle" class="auth-section-title">Google / Apple で作成</div>
+            <div id="signupOAuthHelp" class="auth-section-note">
+                Email と Password は外部アカウントから扱います。
+            </div>
+
+            <div class="auth-provider-actions">
+                <button id="googleSignupBtn" class="auth-btn auth-btn-provider" type="button"></button>
+                <button id="appleSignupBtn" class="auth-btn auth-btn-provider" type="button"></button>
+            </div>
+        </section>
+
+        <section class="auth-section" aria-labelledby="signupEmailTitle">
+            <div id="signupEmailTitle" class="auth-section-title">Email / Password で作成</div>
+            <div id="signupEmailHelp" class="auth-section-note">
+                Email と Password を入力すると、次の画面でメール確認に進みます。
+            </div>
+
+            <label class="auth-label">Email</label>
+            <input id="signupEmail" class="auth-input" type="email" autocomplete="email" placeholder="必須" />
+
+            <label class="auth-label">Password</label>
+            <input id="signupPassword" class="auth-input" type="password" autocomplete="new-password" placeholder="必須" />
+
+            <label class="auth-label">Confirm password</label>
+            <input id="signupPassword2" class="auth-input" type="password" autocomplete="new-password" placeholder="必須" />
+
+            <div id="signupPasswordNote" class="auth-note">
+                Password は 8 文字以上で、英大文字・英小文字・数字を各 1 文字以上含めてください。
+            </div>
+        </section>
 
         <div class="auth-actions auth-actions-stack-mobile">
             <button id="signupSubmitBtn" class="auth-btn auth-btn-primary" type="submit">
