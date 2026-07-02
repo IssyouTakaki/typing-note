@@ -8,7 +8,26 @@
 
         <div id="signupMsg" class="auth-msg" hidden></div>
 
-        <section class="auth-section auth-section-first" aria-labelledby="signupProfileTitle">
+        <section id="signupMethodSection" class="auth-section auth-section-first" aria-labelledby="signupMethodTitle">
+            <div id="signupMethodTitle" class="auth-section-title">作成方法を選択</div>
+            <div id="signupMethodHelp" class="auth-section-note">
+                メールアドレス、Google、Apple から選べます。
+            </div>
+
+            <div class="auth-method-actions">
+                <button id="signupEmailMethodBtn" class="auth-btn auth-btn-provider" type="button">
+                    メールアドレスで作成
+                </button>
+                <button id="signupGoogleMethodBtn" class="auth-btn auth-btn-provider" type="button">
+                    Google OAuth で作成
+                </button>
+                <button id="signupAppleMethodBtn" class="auth-btn auth-btn-provider" type="button">
+                    Apple OAuth で作成
+                </button>
+            </div>
+        </section>
+
+        <section id="signupProfileSection" class="auth-section auth-section-first" aria-labelledby="signupProfileTitle" hidden>
             <div id="signupProfileTitle" class="auth-section-title">TypingNote profile</div>
             <div id="signupProfileHelp" class="auth-section-note">
                 Display name は TypingNote 内で表示される名前です。
@@ -45,19 +64,7 @@
             </label>
         </section>
 
-        <section class="auth-section" aria-labelledby="signupOAuthTitle">
-            <div id="signupOAuthTitle" class="auth-section-title">Google / Apple で作成</div>
-            <div id="signupOAuthHelp" class="auth-section-note">
-                Email と Password は外部アカウントから扱います。
-            </div>
-
-            <div class="auth-provider-actions">
-                <button id="googleSignupBtn" class="auth-btn auth-btn-provider" type="button"></button>
-                <button id="appleSignupBtn" class="auth-btn auth-btn-provider" type="button"></button>
-            </div>
-        </section>
-
-        <section class="auth-section" aria-labelledby="signupEmailTitle">
+        <section id="signupEmailSection" class="auth-section" aria-labelledby="signupEmailTitle" hidden>
             <div id="signupEmailTitle" class="auth-section-title">Email / Password で作成</div>
             <div id="signupEmailHelp" class="auth-section-note">
                 Email と Password を入力すると、次の画面でメール確認に進みます。
@@ -77,15 +84,23 @@
             </div>
         </section>
 
-        <div class="auth-actions auth-actions-stack-mobile">
+        <section id="signupOAuthConfirmSection" class="auth-section" aria-labelledby="signupOAuthConfirmTitle" hidden>
+            <div id="signupOAuthConfirmTitle" class="auth-section-title">Google で作成</div>
+            <div id="signupOAuthConfirmHelp" class="auth-section-note">
+                Display name と同意を確認してから、外部アカウント認証へ進みます。
+            </div>
+        </section>
+
+        <div id="signupFlowActions" class="auth-actions auth-actions-stack-mobile" hidden>
             <button id="signupSubmitBtn" class="auth-btn auth-btn-primary" type="submit">
                 メール確認へ進む
             </button>
-            <button id="signupBackBtn" class="auth-btn auth-btn-secondary" type="button">
-                Sign In に戻る
+            <button id="signupChangeMethodBtn" class="auth-btn auth-btn-secondary" type="button">
+                作成方法を選び直す
             </button>
         </div>
 
+        <button id="signupBackBtn" class="auth-btn auth-btn-link" type="button">Sign In に戻る</button>
         <button id="signupTopBtn" class="auth-btn auth-btn-link" type="button">TypingNote に戻る</button>
     </form>
 </div>

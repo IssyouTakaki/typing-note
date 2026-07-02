@@ -421,7 +421,10 @@ import { qs } from "../../utils/dom";
     startedAt: number;
   };
 
+  type SignUpMethod = "choice" | "email" | OAuthProvider;
+
   type SignUpFormDraft = {
+    method: SignUpMethod;
     displayName: string;
     familyName: string;
     givenName: string;
@@ -920,6 +923,11 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
   
     const msgEl = qs<HTMLDivElement>("#signupMsg");
     const form = qs<HTMLFormElement>("#signupForm");
+    const methodSection = qs<HTMLElement>("#signupMethodSection");
+    const profileSection = qs<HTMLElement>("#signupProfileSection");
+    const emailSection = qs<HTMLElement>("#signupEmailSection");
+    const oauthConfirmSection = qs<HTMLElement>("#signupOAuthConfirmSection");
+    const flowActions = qs<HTMLDivElement>("#signupFlowActions");
     const displayNameEl = qs<HTMLInputElement>("#signupDisplayName");
     const familyNameEl = qs<HTMLInputElement>("#signupFamilyName");
     const givenNameEl = qs<HTMLInputElement>("#signupGivenName");
@@ -928,20 +936,22 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const pass2El = qs<HTMLInputElement>("#signupPassword2");
     const agreeTermsEl = qs<HTMLInputElement>("#agreeTerms");
     const agreePrivacyEl = qs<HTMLInputElement>("#agreePrivacy");
+    const emailMethodBtn = qs<HTMLButtonElement>("#signupEmailMethodBtn");
+    const googleMethodBtn = qs<HTMLButtonElement>("#signupGoogleMethodBtn");
+    const appleMethodBtn = qs<HTMLButtonElement>("#signupAppleMethodBtn");
     const submitBtn = qs<HTMLButtonElement>("#signupSubmitBtn");
+    const changeMethodBtn = qs<HTMLButtonElement>("#signupChangeMethodBtn");
     const backBtn = qs<HTMLButtonElement>("#signupBackBtn");
     const topBtn = qs<HTMLButtonElement>("#signupTopBtn");
     const openTermsBtn = qs<HTMLButtonElement>("#openTermsBtn");
     const openPrivacyBtn = qs<HTMLButtonElement>("#openPrivacyBtn");
-    const googleSignupBtn = qs<HTMLButtonElement>("#googleSignupBtn");
-    const appleSignupBtn = qs<HTMLButtonElement>("#appleSignupBtn");
     
     setText(".auth-title", t("signupTitle"));
     setText("#signupHelp", t("signupHelp"));
+    setText("#signupMethodTitle", t("signupMethodTitle"));
+    setText("#signupMethodHelp", t("signupMethodHelp"));
     setText("#signupProfileTitle", t("signupProfileTitle"));
     setText("#signupProfileHelp", t("signupProfileHelp"));
-    setText("#signupOAuthTitle", t("signupOAuthTitle"));
-    setText("#signupOAuthHelp", t("signupOAuthHelp"));
     setText("#signupEmailTitle", t("signupEmailTitle"));
     setText("#signupEmailHelp", t("signupEmailHelp"));
     displayNameEl.placeholder = t("requiredPlaceholder");
@@ -955,15 +965,65 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     openPrivacyBtn.textContent = t("privacy");
     setText("#agreeTermsText", t("agreeToTermsSuffix"));
     setText("#agreePrivacyText", t("agreeToPrivacySuffix"));
+    emailMethodBtn.textContent = t("signupMethodEmail");
+    googleMethodBtn.textContent = t("signupMethodGoogle");
+    appleMethodBtn.textContent = t("signupMethodApple");
     submitBtn.textContent = t("proceedToEmailVerification");
-    googleSignupBtn.textContent = t("oauthSignUpWithGoogle");
-    appleSignupBtn.textContent = t("oauthSignUpWithApple");
+    changeMethodBtn.textContent = t("signupChangeMethod");
     backBtn.textContent = t("backToSignIn");
     topBtn.textContent = t("backToTypingNote");
+
+    const setMsg = (t: string, kind: "info" | "error" = "error") => {
+      if (!t) {
+        msgEl.hidden = true;
+        msgEl.textContent = "";
+        return;
+      }
+      msgEl.hidden = false;
+      msgEl.textContent = t;
+      msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
+    };
+
+    let selectedMethod: SignUpMethod = signUpFormDraft?.method ?? "choice";
+    const isOAuthSignUpMethod = (
+      method: SignUpMethod
+    ): method is OAuthProvider => method === "google" || method === "apple";
+
+    const applySignUpMethod = (
+      method: SignUpMethod,
+      options: { clearMessage?: boolean; focusFirstField?: boolean } = {}
+    ) => {
+      selectedMethod = method;
+      const isChoice = method === "choice";
+      const isEmail = method === "email";
+      const isOAuth = isOAuthSignUpMethod(method);
+
+      methodSection.hidden = !isChoice;
+      profileSection.hidden = isChoice;
+      emailSection.hidden = !isEmail;
+      oauthConfirmSection.hidden = !isOAuth;
+      flowActions.hidden = isChoice;
+
+      if (isEmail) {
+        submitBtn.textContent = t("proceedToEmailVerification");
+      } else if (method === "google") {
+        setText("#signupOAuthConfirmTitle", t("signupOAuthGoogleTitle"));
+        setText("#signupOAuthConfirmHelp", t("signupOAuthGoogleHelp"));
+        submitBtn.textContent = t("proceedToGoogleOAuth");
+      } else if (method === "apple") {
+        setText("#signupOAuthConfirmTitle", t("signupOAuthAppleTitle"));
+        setText("#signupOAuthConfirmHelp", t("signupOAuthAppleHelp"));
+        submitBtn.textContent = t("proceedToAppleOAuth");
+      }
+
+      if (options.clearMessage) setMsg("");
+      if (options.focusFirstField && !isChoice) displayNameEl.focus();
+    };
 
     const restoreSignUpFormDraft = () => {
       if (!signUpFormDraft) return;
 
+      selectedMethod = signUpFormDraft.method;
       displayNameEl.value = signUpFormDraft.displayName;
       familyNameEl.value = signUpFormDraft.familyName;
       givenNameEl.value = signUpFormDraft.givenName;
@@ -976,6 +1036,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
 
     const captureSignUpFormDraft = () => {
       signUpFormDraft = {
+        method: selectedMethod,
         displayName: displayNameEl.value,
         familyName: familyNameEl.value,
         givenName: givenNameEl.value,
@@ -988,27 +1049,19 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     };
 
     restoreSignUpFormDraft();
-    
-    const setMsg = (t: string, kind: "info" | "error" = "error") => {
-      if (!t) {
-        msgEl.hidden = true;
-        msgEl.textContent = "";
-        return;
-      }
-      msgEl.hidden = false;
-      msgEl.textContent = t;
-      msgEl.style.color = kind === "error" ? "#b00020" : "#0b6b2e";
-    };
-  
+    applySignUpMethod(selectedMethod);
+
     if (message) setMsg(message, authFlashKind);
     else setMsg("");
   
     let busy = false;
     const setBusy = (v: boolean) => {
       busy = v;
+      emailMethodBtn.disabled = v;
+      googleMethodBtn.disabled = v;
+      appleMethodBtn.disabled = v;
       submitBtn.disabled = v;
-      googleSignupBtn.disabled = v;
-      appleSignupBtn.disabled = v;
+      changeMethodBtn.disabled = v;
       backBtn.disabled = v;
       topBtn.disabled = v;
     };
@@ -1069,6 +1122,16 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (busy) return;
+
+      if (selectedMethod === "choice") {
+        setMsg(t("msgSignupMethodRequired"), "error");
+        return;
+      }
+
+      if (isOAuthSignUpMethod(selectedMethod)) {
+        await startOAuthSignup(selectedMethod);
+        return;
+      }
 
       const displayName = buildDisplayName(
         displayNameEl.value,
@@ -1166,12 +1229,20 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       await rerender();
     });
 
-    googleSignupBtn.addEventListener("click", () => {
-      void startOAuthSignup("google");
+    emailMethodBtn.addEventListener("click", () => {
+      applySignUpMethod("email", { clearMessage: true, focusFirstField: true });
     });
 
-    appleSignupBtn.addEventListener("click", () => {
-      void startOAuthSignup("apple");
+    googleMethodBtn.addEventListener("click", () => {
+      applySignUpMethod("google", { clearMessage: true, focusFirstField: true });
+    });
+
+    appleMethodBtn.addEventListener("click", () => {
+      applySignUpMethod("apple", { clearMessage: true, focusFirstField: true });
+    });
+
+    changeMethodBtn.addEventListener("click", () => {
+      applySignUpMethod("choice", { clearMessage: true });
     });
 
     openTermsBtn.addEventListener("click", () => {
