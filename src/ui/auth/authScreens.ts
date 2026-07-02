@@ -1,11 +1,15 @@
 import {
   beginSignUp,
   changePassword,
+  completeProfileAfterOAuth,
   completeProfileAfterOtp,
   confirmAccountDeletion,
+  currentUserRequiresPasswordForDeletion,
   deleteAccountEmail,
   getCurrentLoginEmail,
+  getProfileCompletion,
   getSession,
+  isProfileComplete,
   listAccountEmails,
   promoteAccountEmailToLogin,
   requestPasswordResetEmail,
@@ -15,6 +19,7 @@ import {
   sendLoginEmailChangeOtp,
   sendVerifyAccountEmailOtp,
   signIn,
+  signInWithOAuthProvider,
   signOut,
   startAccountDeletion,
   startLogin2fa,
@@ -24,6 +29,8 @@ import {
   verifyLogin2fa,
   type AccountEmail,
   AccountDeletionError,
+  type OAuthProvider,
+  type PendingOAuthSignUpDraft,
   type PendingSignUpDraft,
 } from "../../repos/authRepo";
 import { supabase } from "../../lib/supabaseClient";
@@ -403,6 +410,16 @@ import { qs } from "../../utils/dom";
   const PRIVACY_VERSION = "v1";
   const PENDING_SIGNUP_STORAGE_KEY = "typingnote.pending-signup";
   const PENDING_SIGNUP_EMAIL_STORAGE_KEY = "typingnote.pending-signup-email";
+  const PENDING_OAUTH_SIGNUP_STORAGE_KEY = "typingnote.pending-oauth-signup";
+  const OAUTH_FLOW_STORAGE_KEY = "typingnote.oauth-flow";
+  const OAUTH_FLOW_TTL_MS = 15 * 60 * 1000;
+
+  type OAuthFlowIntent = "signin" | "signup";
+  type OAuthFlowState = {
+    intent: OAuthFlowIntent;
+    provider: OAuthProvider;
+    startedAt: number;
+  };
 
   type SignUpFormDraft = {
     displayName: string;
@@ -683,6 +700,202 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     if (!canUseLocalStorage()) return;
     localStorage.removeItem(PENDING_SIGNUP_STORAGE_KEY);
   }
+
+  function normalizeOAuthProvider(value: unknown): OAuthProvider | null {
+    return value === "google" || value === "apple" ? value : null;
+  }
+
+  function saveOAuthFlowState(state: OAuthFlowState) {
+    if (!canUseLocalStorage()) return;
+    localStorage.setItem(OAUTH_FLOW_STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function loadOAuthFlowState(): OAuthFlowState | null {
+    if (!canUseLocalStorage()) return null;
+
+    const raw = localStorage.getItem(OAUTH_FLOW_STORAGE_KEY);
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<OAuthFlowState>;
+      const provider = normalizeOAuthProvider(parsed.provider);
+      const intent = parsed.intent === "signup" ? "signup" : "signin";
+      const startedAt = Number(parsed.startedAt);
+
+      if (!provider || !Number.isFinite(startedAt)) return null;
+      if (Date.now() - startedAt > OAUTH_FLOW_TTL_MS) {
+        clearOAuthFlowState();
+        return null;
+      }
+
+      return { intent, provider, startedAt };
+    } catch {
+      return null;
+    }
+  }
+
+  function clearOAuthFlowState() {
+    if (!canUseLocalStorage()) return;
+    localStorage.removeItem(OAUTH_FLOW_STORAGE_KEY);
+  }
+
+  function savePendingOAuthSignUpDraft(draft: PendingOAuthSignUpDraft) {
+    if (!canUseLocalStorage()) return;
+    localStorage.setItem(PENDING_OAUTH_SIGNUP_STORAGE_KEY, JSON.stringify(draft));
+  }
+
+  function loadPendingOAuthSignUpDraft(): PendingOAuthSignUpDraft | null {
+    if (!canUseLocalStorage()) return null;
+
+    const raw = localStorage.getItem(PENDING_OAUTH_SIGNUP_STORAGE_KEY);
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<PendingOAuthSignUpDraft>;
+      const i18n = getI18nState();
+
+      return {
+        displayName: String(parsed.displayName ?? "").trim(),
+        familyName: String(parsed.familyName ?? "").trim(),
+        givenName: String(parsed.givenName ?? "").trim(),
+        agreedTermsAt: String(parsed.agreedTermsAt ?? ""),
+        termsVersion: String(parsed.termsVersion ?? TERMS_VERSION),
+        agreedPrivacyAt: String(parsed.agreedPrivacyAt ?? ""),
+        privacyVersion: String(parsed.privacyVersion ?? PRIVACY_VERSION),
+        localePreference:
+          normalizeLocalePreference(parsed.localePreference) ?? i18n.localePreference,
+        resolvedLocale:
+          normalizeResolvedLocale(parsed.resolvedLocale) ?? i18n.resolvedLocale,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function clearPendingOAuthSignUpDraft() {
+    if (!canUseLocalStorage()) return;
+    localStorage.removeItem(PENDING_OAUTH_SIGNUP_STORAGE_KEY);
+  }
+
+  function clearOAuthState() {
+    clearOAuthFlowState();
+    clearPendingOAuthSignUpDraft();
+  }
+
+  function buildOAuthRedirectTo() {
+    const url = new URL(import.meta.env.BASE_URL, window.location.origin);
+    const { resolvedLocale } = getI18nState();
+
+    url.searchParams.set("auth", "oauth");
+    url.searchParams.set("lang", resolvedLocale);
+
+    return url.toString();
+  }
+
+  async function startOAuthFlow(
+    provider: OAuthProvider,
+    intent: OAuthFlowIntent,
+    draft?: PendingOAuthSignUpDraft
+  ) {
+    saveOAuthFlowState({
+      intent,
+      provider,
+      startedAt: Date.now(),
+    });
+
+    if (draft) {
+      savePendingOAuthSignUpDraft(draft);
+    } else {
+      clearPendingOAuthSignUpDraft();
+    }
+
+    await signInWithOAuthProvider(provider, buildOAuthRedirectTo());
+  }
+
+  function inferOAuthProviderFromSession(session: any): OAuthProvider | null {
+    const providers = new Set<string>();
+    const user = session?.user as
+      | {
+          app_metadata?: { provider?: unknown; providers?: unknown };
+          identities?: Array<{ provider?: unknown }>;
+        }
+      | undefined;
+
+    const primaryProvider = user?.app_metadata?.provider;
+    if (typeof primaryProvider === "string") providers.add(primaryProvider);
+
+    const providerList = user?.app_metadata?.providers;
+    if (Array.isArray(providerList)) {
+      providerList.forEach((provider) => {
+        if (typeof provider === "string") providers.add(provider);
+      });
+    }
+
+    user?.identities?.forEach((identity) => {
+      if (typeof identity.provider === "string") providers.add(identity.provider);
+    });
+
+    if (providers.has("google")) return "google";
+    if (providers.has("apple")) return "apple";
+    return null;
+  }
+
+  export async function handleOAuthSignedInSession(session: any): Promise<boolean> {
+    const userId = String(session?.user?.id ?? "");
+    if (!userId) return false;
+
+    const flow = loadOAuthFlowState();
+    const provider = flow?.provider ?? inferOAuthProviderFromSession(session);
+    const profile = await getProfileCompletion(userId);
+
+    if (isProfileComplete(profile)) {
+      if (flow && provider) {
+        trackEvent("auth_signin_succeeded", { trigger: provider });
+      }
+      clearOAuthState();
+      return false;
+    }
+
+    if (flow?.intent === "signup") {
+      const draft = loadPendingOAuthSignUpDraft();
+      const email = String(session?.user?.email ?? "").trim().toLowerCase();
+
+      if (!draft) {
+        await signOut();
+        openAccountScreen("signup", t("msgOAuthSignupDraftMissing"), "error");
+        return true;
+      }
+
+      if (!email) {
+        clearOAuthState();
+        await signOut();
+        openAccountScreen("signup", t("msgOAuthSignupEmailMissing"), "error");
+        return true;
+      }
+
+      await completeProfileAfterOAuth({
+        ...draft,
+        email,
+      });
+
+      applyI18nProfile({
+        locale_preference: draft.localePreference,
+        resolved_locale: draft.resolvedLocale,
+      });
+      trackEvent("auth_signin_succeeded", { trigger: flow.provider });
+      clearOAuthState();
+      return false;
+    }
+
+    if (provider) {
+      clearOAuthState();
+      await signOut();
+      openAccountScreen("signup", t("msgOAuthAccountRequiresSignup"), "error");
+      return true;
+    }
+
+    return false;
+  }
   
   function buildDisplayName(displayName: string, familyName: string, givenName: string) {
     const direct = displayName.trim();
@@ -720,6 +933,8 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const topBtn = qs<HTMLButtonElement>("#signupTopBtn");
     const openTermsBtn = qs<HTMLButtonElement>("#openTermsBtn");
     const openPrivacyBtn = qs<HTMLButtonElement>("#openPrivacyBtn");
+    const googleSignupBtn = qs<HTMLButtonElement>("#googleSignupBtn");
+    const appleSignupBtn = qs<HTMLButtonElement>("#appleSignupBtn");
     
     setText(".auth-title", t("signupTitle"));
     setText("#signupHelp", t("signupHelp"));
@@ -735,6 +950,8 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     setText("#agreeTermsText", t("agreeToTermsSuffix"));
     setText("#agreePrivacyText", t("agreeToPrivacySuffix"));
     submitBtn.textContent = t("proceedToEmailVerification");
+    googleSignupBtn.textContent = t("oauthSignUpWithGoogle");
+    appleSignupBtn.textContent = t("oauthSignUpWithApple");
     backBtn.textContent = t("backToSignIn");
     topBtn.textContent = t("backToTypingNote");
 
@@ -784,8 +1001,63 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const setBusy = (v: boolean) => {
       busy = v;
       submitBtn.disabled = v;
+      googleSignupBtn.disabled = v;
+      appleSignupBtn.disabled = v;
       backBtn.disabled = v;
       topBtn.disabled = v;
+    };
+
+    const buildPendingOAuthDraft = (): PendingOAuthSignUpDraft | null => {
+      const displayName = buildDisplayName(
+        displayNameEl.value,
+        familyNameEl.value,
+        givenNameEl.value
+      );
+      const familyName = familyNameEl.value.trim();
+      const givenName = givenNameEl.value.trim();
+
+      if (!displayName) {
+        setMsg(t("msgDisplayNameRequired"), "error");
+        return null;
+      }
+
+      if (!agreeTermsEl.checked || !agreePrivacyEl.checked) {
+        setMsg(t("msgTermsPrivacyRequired"), "error");
+        return null;
+      }
+
+      const agreedAt = new Date().toISOString();
+      const i18n = getI18nState();
+
+      return {
+        displayName,
+        familyName,
+        givenName,
+        agreedTermsAt: agreedAt,
+        termsVersion: TERMS_VERSION,
+        agreedPrivacyAt: agreedAt,
+        privacyVersion: PRIVACY_VERSION,
+        localePreference: i18n.localePreference,
+        resolvedLocale: i18n.resolvedLocale,
+      };
+    };
+
+    const startOAuthSignup = async (provider: OAuthProvider) => {
+      if (busy) return;
+
+      const draft = buildPendingOAuthDraft();
+      if (!draft) return;
+
+      try {
+        setBusy(true);
+        captureSignUpFormDraft();
+        setMsg(t("msgOAuthStarting"), "info");
+        await startOAuthFlow(provider, "signup", draft);
+      } catch (error) {
+        console.error(error);
+        setMsg(formatAuthErrorMessage(error), "error");
+        setBusy(false);
+      }
     };
   
     form.addEventListener("submit", async (e) => {
@@ -886,6 +1158,14 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       signUpFormDraft = null;
       appScreen = "memo";
       await rerender();
+    });
+
+    googleSignupBtn.addEventListener("click", () => {
+      void startOAuthSignup("google");
+    });
+
+    appleSignupBtn.addEventListener("click", () => {
+      void startOAuthSignup("apple");
     });
 
     openTermsBtn.addEventListener("click", () => {
@@ -1168,6 +1448,8 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const passEl = qs<HTMLInputElement>("#password");
     const signupBtn = qs<HTMLButtonElement>("#signupBtn");
     const signinBtn = qs<HTMLButtonElement>("#signinBtn");
+    const googleSigninBtn = qs<HTMLButtonElement>("#googleSigninBtn");
+    const appleSigninBtn = qs<HTMLButtonElement>("#appleSigninBtn");
     const forgotBtn = qs<HTMLButtonElement>("#forgotBtn");
     const restoreAccountBtn = qs<HTMLButtonElement>("#restoreAccountBtn");
     const backToTopBtn = qs<HTMLButtonElement>("#backToTopBtn");
@@ -1175,6 +1457,8 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const openPrivacyFromAuthBtn = qs<HTMLButtonElement>("#openPrivacyFromAuthBtn");
     
     setMultilineText("#authHelp", t("authHelp"));
+    googleSigninBtn.textContent = t("oauthSignInWithGoogle");
+    appleSigninBtn.textContent = t("oauthSignInWithApple");
     signupBtn.textContent = t("createAccount");
     forgotBtn.textContent = t("forgotPassword");
     restoreAccountBtn.textContent = t("restoreAccountLink");
@@ -1206,9 +1490,25 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       busy = v;
       signupBtn.disabled = v;
       signinBtn.disabled = v;
+      googleSigninBtn.disabled = v;
+      appleSigninBtn.disabled = v;
       forgotBtn.disabled = v;
       restoreAccountBtn.disabled = v;
       backToTopBtn.disabled = v;
+    };
+
+    const startOAuthSignin = async (provider: OAuthProvider) => {
+      if (busy) return;
+
+      try {
+        setBusy(true);
+        setMsg(t("msgOAuthStarting"), "info");
+        await startOAuthFlow(provider, "signin");
+      } catch (error) {
+        console.error(error);
+        setMsg(formatAuthErrorMessage(error), "error");
+        setBusy(false);
+      }
     };
   
     form.addEventListener("submit", async (e) => {
@@ -1280,6 +1580,14 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     signupBtn.addEventListener("click", async () => {
       if (busy) return;
       openAccountScreen("signup");
+    });
+
+    googleSigninBtn.addEventListener("click", () => {
+      void startOAuthSignin("google");
+    });
+
+    appleSigninBtn.addEventListener("click", () => {
+      void startOAuthSignin("apple");
     });
   
     forgotBtn.addEventListener("click", async () => {
@@ -1449,6 +1757,9 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const newAccountPasswordConfirmInput = qs<HTMLInputElement>("#newAccountPasswordConfirmInput");
     const changePasswordBtn = qs<HTMLButtonElement>("#changePasswordBtn");
     const accountDeletionMsg = qs<HTMLDivElement>("#accountDeletionMsg");
+    const accountDeletionPasswordArea = qs<HTMLDivElement>(
+      "#accountDeletionPasswordArea"
+    );
     const accountDeletionPasswordInput = qs<HTMLInputElement>("#accountDeletionPasswordInput");
     const startAccountDeletionBtn = qs<HTMLButtonElement>("#startAccountDeletionBtn");
     const accountDeletionOtpArea = qs<HTMLDivElement>("#accountDeletionOtpArea");
@@ -1546,6 +1857,21 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     confirmAccountDeletionBtn.textContent = t("accountDeletionConfirm");
     adminAnalyticsBtn.textContent = t("adminAnalyticsButton");
     backBtn.textContent = t("backToTypingNote");
+
+    let accountDeletionRequiresPassword = true;
+    const applyAccountDeletionPasswordRequirement = (requiresPassword: boolean) => {
+      accountDeletionRequiresPassword = requiresPassword;
+      accountDeletionPasswordArea.hidden = !requiresPassword;
+      if (!requiresPassword) {
+        accountDeletionPasswordInput.value = "";
+      }
+      setMultilineText(
+        "#accountDeletionNote",
+        requiresPassword ? t("accountDeletionNote") : t("accountDeletionNoteOtpOnly")
+      );
+    };
+
+    applyAccountDeletionPasswordRequirement(true);
 
     const current = getI18nState();
     selectEl.value = current.localePreference;
@@ -1845,6 +2171,13 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       console.error(error);
       setMsg(t("accountReadingSecurityEmailsFailed"), "error");
     });
+
+    void currentUserRequiresPasswordForDeletion()
+      .then(applyAccountDeletionPasswordRequirement)
+      .catch((error) => {
+        console.warn("[auth] failed to inspect auth providers", error);
+        applyAccountDeletionPasswordRequirement(true);
+      });
 
     void isAdminAnalyticsAvailable()
       .then((available) => {
@@ -2159,18 +2492,23 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     startAccountDeletionBtn.addEventListener("click", async () => {
       if (busy) return;
       const password = accountDeletionPasswordInput.value;
-      if (!password) {
+      if (accountDeletionRequiresPassword && !password) {
         setAccountDeletionMsg(t("msgPasswordRequired"), "error");
         return;
       }
 
       try {
         setBusy(true);
-        setAccountDeletionMsg(t("accountDeletionStarting"), "info");
+        setAccountDeletionMsg(
+          accountDeletionRequiresPassword
+            ? t("accountDeletionStarting")
+            : t("accountDeletionStartingOtpOnly"),
+          "info"
+        );
         clearAccountDeletionOtpState();
 
         const result = await startAccountDeletion({
-          password,
+          password: accountDeletionRequiresPassword ? password : undefined,
           resolvedLocale: getI18nState().resolvedLocale,
         });
         accountDeletionPasswordInput.value = "";

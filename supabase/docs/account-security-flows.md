@@ -44,7 +44,10 @@ recovery for 30 days before permanent deletion.
 
 Agreed behavior:
 
-- The signed-in user must enter the current password.
+- If the signed-in user has an email/password identity, the user must enter the
+  current password before the deletion OTP is sent.
+- If the signed-in user is OAuth-only, TypingNote does not require a current
+  password and starts deletion confirmation with email OTP.
 - TypingNote sends a 6-digit, 10-minute OTP to the current Login mail.
 - Only after the OTP and final confirmation are accepted does the 30-day grace
   period begin.

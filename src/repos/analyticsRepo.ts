@@ -39,7 +39,7 @@ type AppEventMetadata = {
     included_environment: boolean;
   };
   auth_signin_succeeded: {
-    trigger: "password";
+    trigger: "password" | "google" | "apple";
   };
 };
 
@@ -64,7 +64,16 @@ const EVENT_METADATA_KEYS: Record<AppEventName, readonly string[]> = {
 
 const STRING_VALUES_BY_KEY: Record<string, readonly string[]> = {
   result: ["noop", "created", "updated", "auth_required", "opened", "activated"],
-  trigger: ["shortcut", "auto_update", "button", "shortcut_tab", "input", "password"],
+  trigger: [
+    "shortcut",
+    "auto_update",
+    "button",
+    "shortcut_tab",
+    "input",
+    "password",
+    "google",
+    "apple",
+  ],
   surface: ["editor", "explorer", "dust"],
 };
 

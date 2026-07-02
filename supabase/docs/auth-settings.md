@@ -20,6 +20,8 @@ Recorded from Supabase Dashboard screenshots shared on 2026-06-17.
 | Require current password when updating | disabled | Current password is not requested in Account settings |
 | Prevent use of leaked passwords | disabled | Free plan screen notes this is Pro plan and above |
 | Email OTP enabled | enabled by template/config context | Magic link or OTP template is configured |
+| Google provider enabled | TODO | Required for Google OAuth sign-in and account creation |
+| Apple provider enabled | TODO | Required for Apple OAuth sign-in and account creation |
 | Password min length | 8 | TypingNote client policy is 8 |
 | Password requires uppercase | TODO | TypingNote client requires uppercase |
 | Password requires lowercase | TODO | TypingNote client requires lowercase |
@@ -47,6 +49,27 @@ The following notification emails are configured off in the screenshots:
 - Sign-in method removed
 - MFA method added
 - MFA method removed
+
+## Social Login Providers
+
+TypingNote supports Google and Apple OAuth through Supabase Auth. Do not record
+provider secrets in this repository.
+
+Dashboard and provider consoles to check:
+
+| Provider | Supabase setting | External console setting |
+| --- | --- | --- |
+| Google | Enable Google provider and set Client ID / Client Secret | Google Cloud OAuth client must allow the Supabase Auth callback URL |
+| Apple | Enable Apple provider and set Apple credentials | Apple Developer Services ID / domain / return URL must allow the Supabase Auth callback URL |
+
+TypingNote app redirect URLs:
+
+- Local: `http://localhost:5173/typing-note/**`
+- Production: `https://issyouTakaki.github.io/typing-note/**`
+
+OAuth account creation must still pass through the TypingNote Create account
+screen so that profile data, Terms agreement, Privacy Policy agreement, and
+locale settings are saved before the user can use the app.
 
 ## Edge Function
 

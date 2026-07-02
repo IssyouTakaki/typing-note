@@ -11,6 +11,7 @@ import {
   consumeForceSignedOutScreen,
   getAppScreen,
   getAuthMode,
+  handleOAuthSignedInSession,
   mountAdminAnalyticsUI,
   mountAuthUI,
   mountAccountSettingsUI,
@@ -122,6 +123,36 @@ function shouldKeepCurrentScreenOnSignedIn() {
   return getAppScreen() === "accountSettings" || getAppScreen() === "adminAnalytics";
 }
 
+let signedInSessionHandling = false;
+
+async function handleSignedInSession(session: any) {
+  if (signedInSessionHandling) return;
+  signedInSessionHandling = true;
+
+  try {
+    await syncI18nFromSession(session);
+    if (shouldSuppressSignedInRerender()) return;
+
+    const oauthHandled = await handleOAuthSignedInSession(session);
+    if (oauthHandled) return;
+
+    if (shouldKeepCurrentScreenOnSignedIn()) {
+      return;
+    }
+
+    const needs2fa = await requireLogin2faIfNeeded();
+
+    if (needs2fa) {
+      return;
+    }
+
+    setAppScreen("memo");
+    await rerender();
+  } finally {
+    signedInSessionHandling = false;
+  }
+}
+
 export async function mountApp() {
   syncPostHogIdentity(null);
 
@@ -153,23 +184,7 @@ export async function mountApp() {
 
     if (event === "SIGNED_IN") {
       setAuthMode("normal");
-      void (async () => {
-        await syncI18nFromSession(session);
-        if (shouldSuppressSignedInRerender()) return;
-
-        if (shouldKeepCurrentScreenOnSignedIn()) {
-          return;
-        }
-
-        const needs2fa = await requireLogin2faIfNeeded();
-
-        if (needs2fa) {
-          return;
-        }
-
-        setAppScreen("memo");
-        await rerender();
-      })().catch(console.error);
+      void handleSignedInSession(session).catch(console.error);
       return;
     }
 
@@ -185,5 +200,11 @@ export async function mountApp() {
   const initialSession = (await supabase.auth.getSession()).data.session;
   syncPostHogIdentity(initialSession);
   await syncI18nFromSession(initialSession);
+  if (initialUrl.searchParams.get("auth") === "oauth" && initialSession) {
+    const cleanUrl = new URL(import.meta.env.BASE_URL, window.location.origin);
+    window.history.replaceState(null, "", cleanUrl.toString());
+    await handleSignedInSession(initialSession);
+    return;
+  }
   await rerender();
 }
