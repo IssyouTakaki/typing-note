@@ -18,6 +18,8 @@ const ja = {
   signupTitle: "TypingNote アカウント作成",
   signupHelp:
     "はじめにアカウント作成方法を選んでください。選択後に必要な情報だけ入力します。",
+  signupEmailLegacyHelp:
+    "アカウント情報を入力すると、次の画面でメール確認に進みます。",
   signupMethodTitle: "作成方法を選択",
   signupMethodHelp:
     "メールアドレス、Google、Apple のどれで TypingNote アカウントを作るか選べます。",
@@ -315,6 +317,8 @@ const en: Record<keyof typeof ja, string> = {
   signupTitle: "Create your TypingNote account",
   signupHelp:
     "Choose how to create your account first. Then enter only the details needed for that method.",
+  signupEmailLegacyHelp:
+    "Enter your account information, then continue to email verification.",
   signupMethodTitle: "Choose a creation method",
   signupMethodHelp:
     "Choose whether to create your TypingNote account with email, Google, or Apple.",

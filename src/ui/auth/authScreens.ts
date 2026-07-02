@@ -924,8 +924,10 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const msgEl = qs<HTMLDivElement>("#signupMsg");
     const form = qs<HTMLFormElement>("#signupForm");
     const methodSection = qs<HTMLElement>("#signupMethodSection");
+    const choiceActions = qs<HTMLDivElement>("#signupChoiceActions");
     const profileSection = qs<HTMLElement>("#signupProfileSection");
     const emailSection = qs<HTMLElement>("#signupEmailSection");
+    const legalSection = qs<HTMLElement>("#signupLegalSection");
     const oauthConfirmSection = qs<HTMLElement>("#signupOAuthConfirmSection");
     const flowActions = qs<HTMLDivElement>("#signupFlowActions");
     const displayNameEl = qs<HTMLInputElement>("#signupDisplayName");
@@ -941,6 +943,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     const appleMethodBtn = qs<HTMLButtonElement>("#signupAppleMethodBtn");
     const submitBtn = qs<HTMLButtonElement>("#signupSubmitBtn");
     const changeMethodBtn = qs<HTMLButtonElement>("#signupChangeMethodBtn");
+    const choiceBackBtn = qs<HTMLButtonElement>("#signupChoiceBackBtn");
     const backBtn = qs<HTMLButtonElement>("#signupBackBtn");
     const topBtn = qs<HTMLButtonElement>("#signupTopBtn");
     const openTermsBtn = qs<HTMLButtonElement>("#openTermsBtn");
@@ -970,6 +973,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     appleMethodBtn.textContent = t("signupMethodApple");
     submitBtn.textContent = t("proceedToEmailVerification");
     changeMethodBtn.textContent = t("signupChangeMethod");
+    choiceBackBtn.textContent = t("backToSignIn");
     backBtn.textContent = t("backToSignIn");
     topBtn.textContent = t("backToTypingNote");
 
@@ -998,22 +1002,32 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       const isEmail = method === "email";
       const isOAuth = isOAuthSignUpMethod(method);
 
+      form.classList.toggle("is-email-signup", isEmail);
       methodSection.hidden = !isChoice;
+      choiceActions.hidden = !isChoice;
       profileSection.hidden = isChoice;
       emailSection.hidden = !isEmail;
+      legalSection.hidden = isChoice;
       oauthConfirmSection.hidden = !isOAuth;
       flowActions.hidden = isChoice;
+      changeMethodBtn.hidden = isEmail;
+      backBtn.hidden = !isEmail;
 
       if (isEmail) {
+        setText("#signupHelp", t("signupEmailLegacyHelp"));
         submitBtn.textContent = t("proceedToEmailVerification");
       } else if (method === "google") {
+        setText("#signupHelp", t("signupHelp"));
         setText("#signupOAuthConfirmTitle", t("signupOAuthGoogleTitle"));
         setText("#signupOAuthConfirmHelp", t("signupOAuthGoogleHelp"));
         submitBtn.textContent = t("proceedToGoogleOAuth");
       } else if (method === "apple") {
+        setText("#signupHelp", t("signupHelp"));
         setText("#signupOAuthConfirmTitle", t("signupOAuthAppleTitle"));
         setText("#signupOAuthConfirmHelp", t("signupOAuthAppleHelp"));
         submitBtn.textContent = t("proceedToAppleOAuth");
+      } else {
+        setText("#signupHelp", t("signupHelp"));
       }
 
       if (options.clearMessage) setMsg("");
@@ -1062,6 +1076,7 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
       appleMethodBtn.disabled = v;
       submitBtn.disabled = v;
       changeMethodBtn.disabled = v;
+      choiceBackBtn.disabled = v;
       backBtn.disabled = v;
       topBtn.disabled = v;
     };
@@ -1219,6 +1234,11 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     });
 
     backBtn.addEventListener("click", async () => {
+      signUpFormDraft = null;
+      openAccountScreen("signin");
+    });
+
+    choiceBackBtn.addEventListener("click", async () => {
       signUpFormDraft = null;
       openAccountScreen("signin");
     });
