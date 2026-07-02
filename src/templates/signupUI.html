@@ -25,6 +25,12 @@
                     Apple OAuth で作成
                 </button>
             </div>
+
+            <div id="signupChoiceActions" class="auth-actions auth-actions-stack-mobile">
+                <button id="signupChoiceBackBtn" class="auth-btn auth-btn-secondary" type="button">
+                    Sign In に戻る
+                </button>
+            </div>
         </section>
 
         <section id="signupProfileSection" class="auth-section auth-section-first" aria-labelledby="signupProfileTitle" hidden>
@@ -46,22 +52,6 @@
                     <input id="signupGivenName" class="auth-input" type="text" autocomplete="given-name" placeholder="任意" />
                 </div>
             </div>
-
-            <label class="auth-check">
-                <input id="agreeTerms" type="checkbox" />
-                <span>
-                    <button id="openTermsBtn" class="auth-inline-link" type="button">利用規約</button>
-                    <span id="agreeTermsText">に同意する</span>
-                </span>
-            </label>
-
-            <label class="auth-check">
-                <input id="agreePrivacy" type="checkbox" />
-                <span>
-                    <button id="openPrivacyBtn" class="auth-inline-link" type="button">プライバシーポリシー</button>
-                    <span id="agreePrivacyText">に同意する</span>
-                </span>
-            </label>
         </section>
 
         <section id="signupEmailSection" class="auth-section" aria-labelledby="signupEmailTitle" hidden>
@@ -84,6 +74,24 @@
             </div>
         </section>
 
+        <section id="signupLegalSection" class="auth-section" hidden>
+            <label class="auth-check">
+                <input id="agreeTerms" type="checkbox" />
+                <span>
+                    <button id="openTermsBtn" class="auth-inline-link" type="button">利用規約</button>
+                    <span id="agreeTermsText">に同意する</span>
+                </span>
+            </label>
+
+            <label class="auth-check">
+                <input id="agreePrivacy" type="checkbox" />
+                <span>
+                    <button id="openPrivacyBtn" class="auth-inline-link" type="button">プライバシーポリシー</button>
+                    <span id="agreePrivacyText">に同意する</span>
+                </span>
+            </label>
+        </section>
+
         <section id="signupOAuthConfirmSection" class="auth-section" aria-labelledby="signupOAuthConfirmTitle" hidden>
             <div id="signupOAuthConfirmTitle" class="auth-section-title">Google で作成</div>
             <div id="signupOAuthConfirmHelp" class="auth-section-note">
@@ -98,9 +106,11 @@
             <button id="signupChangeMethodBtn" class="auth-btn auth-btn-secondary" type="button">
                 作成方法を選び直す
             </button>
+            <button id="signupBackBtn" class="auth-btn auth-btn-secondary" type="button">
+                Sign In に戻る
+            </button>
         </div>
 
-        <button id="signupBackBtn" class="auth-btn auth-btn-link" type="button">Sign In に戻る</button>
         <button id="signupTopBtn" class="auth-btn auth-btn-link" type="button">TypingNote に戻る</button>
     </form>
 </div>
