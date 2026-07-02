@@ -16,7 +16,17 @@ const ja = {
   privacy: "プライバシーポリシー",
 
   signupTitle: "TypingNote アカウント作成",
-  signupHelp: "アカウント情報を入力すると、次の画面でメール確認に進みます。",
+  signupHelp:
+    "TypingNote で使う名前を決めて、アカウント作成方法を選んでください。Google / Apple では Email と Password の入力は不要です。",
+  signupProfileTitle: "TypingNote profile",
+  signupProfileHelp:
+    "Display name は TypingNote 内で表示される名前です。Family name / Given name は任意です。",
+  signupOAuthTitle: "Google / Apple で作成",
+  signupOAuthHelp:
+    "外部アカウントのメールを使います。ここで必要なのは Display name と同意だけです。",
+  signupEmailTitle: "Email / Password で作成",
+  signupEmailHelp:
+    "Email と Password を入力すると、次の画面でメール確認に進みます。",
   requiredPlaceholder: "必須",
   optionalPlaceholder: "任意",
   passwordPolicyNote:
@@ -290,7 +300,17 @@ const en: Record<keyof typeof ja, string> = {
   privacy: "Privacy Policy",
 
   signupTitle: "Create your TypingNote account",
-  signupHelp: "Enter your account information, then continue to email verification.",
+  signupHelp:
+    "Choose the name you will use in TypingNote, then choose how to create your account. Google / Apple does not require entering Email or Password here.",
+  signupProfileTitle: "TypingNote profile",
+  signupProfileHelp:
+    "Display name is the name shown inside TypingNote. Family name and Given name are optional.",
+  signupOAuthTitle: "Create with Google / Apple",
+  signupOAuthHelp:
+    "We use the email from your external account. Only Display name and agreement are required here.",
+  signupEmailTitle: "Create with Email / Password",
+  signupEmailHelp:
+    "Enter Email and Password, then continue to email verification.",
   requiredPlaceholder: "Required",
   optionalPlaceholder: "Optional",
   passwordPolicyNote:

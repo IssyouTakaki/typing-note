@@ -938,6 +938,12 @@ const LOGIN_2FA_BROWSER_SECRET_STORAGE_KEY =
     
     setText(".auth-title", t("signupTitle"));
     setText("#signupHelp", t("signupHelp"));
+    setText("#signupProfileTitle", t("signupProfileTitle"));
+    setText("#signupProfileHelp", t("signupProfileHelp"));
+    setText("#signupOAuthTitle", t("signupOAuthTitle"));
+    setText("#signupOAuthHelp", t("signupOAuthHelp"));
+    setText("#signupEmailTitle", t("signupEmailTitle"));
+    setText("#signupEmailHelp", t("signupEmailHelp"));
     displayNameEl.placeholder = t("requiredPlaceholder");
     familyNameEl.placeholder = t("optionalPlaceholder");
     givenNameEl.placeholder = t("optionalPlaceholder");
