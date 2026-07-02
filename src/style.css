@@ -935,7 +935,8 @@ body {
   font-size: 13px;
 }
 
-.auth-provider-actions{
+.auth-provider-actions,
+.auth-method-actions{
   display: grid;
   gap: 8px;
   margin: 12px 0;

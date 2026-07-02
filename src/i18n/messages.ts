@@ -17,13 +17,25 @@ const ja = {
 
   signupTitle: "TypingNote アカウント作成",
   signupHelp:
-    "TypingNote で使う名前を決めて、アカウント作成方法を選んでください。Google / Apple では Email と Password の入力は不要です。",
+    "はじめにアカウント作成方法を選んでください。選択後に必要な情報だけ入力します。",
+  signupMethodTitle: "作成方法を選択",
+  signupMethodHelp:
+    "メールアドレス、Google、Apple のどれで TypingNote アカウントを作るか選べます。",
+  signupMethodEmail: "メールアドレスで作成",
+  signupMethodGoogle: "Google OAuth で作成",
+  signupMethodApple: "Apple OAuth で作成",
+  signupChangeMethod: "作成方法を選び直す",
   signupProfileTitle: "TypingNote profile",
   signupProfileHelp:
     "Display name は TypingNote 内で表示される名前です。Family name / Given name は任意です。",
-  signupOAuthTitle: "Google / Apple で作成",
-  signupOAuthHelp:
-    "外部アカウントのメールを使います。ここで必要なのは Display name と同意だけです。",
+  signupOAuthGoogleTitle: "Google OAuth で作成",
+  signupOAuthAppleTitle: "Apple OAuth で作成",
+  signupOAuthGoogleHelp:
+    "Display name と同意を確認してから、Google の認証画面へ進みます。",
+  signupOAuthAppleHelp:
+    "Display name と同意を確認してから、Apple の認証画面へ進みます。",
+  proceedToGoogleOAuth: "Google 認証へ進む",
+  proceedToAppleOAuth: "Apple 認証へ進む",
   signupEmailTitle: "Email / Password で作成",
   signupEmailHelp:
     "Email と Password を入力すると、次の画面でメール確認に進みます。",
@@ -56,6 +68,7 @@ const ja = {
   goToSignIn: "Sign in へ進む",
 
   msgAuthRequiredEmailPassword: "Email と Password を入力してください。",
+  msgSignupMethodRequired: "アカウント作成方法を選択してください。",
   msgDisplayNameRequired: "Display name を入力してください。",
   msgEmailRequired: "Email を入力してください。",
   msgPasswordRequired: "Password を入力してください。",
@@ -301,13 +314,25 @@ const en: Record<keyof typeof ja, string> = {
 
   signupTitle: "Create your TypingNote account",
   signupHelp:
-    "Choose the name you will use in TypingNote, then choose how to create your account. Google / Apple does not require entering Email or Password here.",
+    "Choose how to create your account first. Then enter only the details needed for that method.",
+  signupMethodTitle: "Choose a creation method",
+  signupMethodHelp:
+    "Choose whether to create your TypingNote account with email, Google, or Apple.",
+  signupMethodEmail: "Create with email address",
+  signupMethodGoogle: "Create with Google OAuth",
+  signupMethodApple: "Create with Apple OAuth",
+  signupChangeMethod: "Choose another method",
   signupProfileTitle: "TypingNote profile",
   signupProfileHelp:
     "Display name is the name shown inside TypingNote. Family name and Given name are optional.",
-  signupOAuthTitle: "Create with Google / Apple",
-  signupOAuthHelp:
-    "We use the email from your external account. Only Display name and agreement are required here.",
+  signupOAuthGoogleTitle: "Create with Google OAuth",
+  signupOAuthAppleTitle: "Create with Apple OAuth",
+  signupOAuthGoogleHelp:
+    "Confirm your Display name and agreement, then continue to Google authentication.",
+  signupOAuthAppleHelp:
+    "Confirm your Display name and agreement, then continue to Apple authentication.",
+  proceedToGoogleOAuth: "Continue to Google authentication",
+  proceedToAppleOAuth: "Continue to Apple authentication",
   signupEmailTitle: "Create with Email / Password",
   signupEmailHelp:
     "Enter Email and Password, then continue to email verification.",
@@ -340,6 +365,7 @@ const en: Record<keyof typeof ja, string> = {
   goToSignIn: "Go to Sign in",
 
   msgAuthRequiredEmailPassword: "Enter Email and Password.",
+  msgSignupMethodRequired: "Choose an account creation method.",
   msgDisplayNameRequired: "Enter Display name.",
   msgEmailRequired: "Enter Email.",
   msgPasswordRequired: "Enter Password.",
