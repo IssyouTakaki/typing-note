@@ -181,6 +181,8 @@ function createAdminClient() {
   );
 }
 
+type AdminClient = ReturnType<typeof createAdminClient>;
+
 async function getAuthenticatedContext(req: Request): Promise<AuthContext> {
   const authHeader = req.headers.get("Authorization") ?? "";
   const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
@@ -207,6 +209,50 @@ async function getAuthenticatedContext(req: Request): Promise<AuthContext> {
     email: data.user.email,
     accessToken,
   };
+}
+
+function collectAuthProviderIds(user: unknown): string[] {
+  const providerIds = new Set<string>();
+  const record = user as {
+    app_metadata?: {
+      provider?: unknown;
+      providers?: unknown;
+    };
+    identities?: Array<{ provider?: unknown }>;
+  } | null;
+
+  const primaryProvider = record?.app_metadata?.provider;
+  if (typeof primaryProvider === "string" && primaryProvider) {
+    providerIds.add(primaryProvider);
+  }
+
+  const providers = record?.app_metadata?.providers;
+  if (Array.isArray(providers)) {
+    providers.forEach((provider) => {
+      if (typeof provider === "string" && provider) providerIds.add(provider);
+    });
+  }
+
+  record?.identities?.forEach((identity) => {
+    if (typeof identity.provider === "string" && identity.provider) {
+      providerIds.add(identity.provider);
+    }
+  });
+
+  return [...providerIds];
+}
+
+async function userRequiresPasswordForDeletion(
+  admin: AdminClient,
+  userId: string,
+) {
+  const { data, error } = await admin.auth.admin.getUserById(userId);
+  if (error) throw error;
+
+  const providers = collectAuthProviderIds(data.user);
+  if (providers.length === 0) return true;
+
+  return providers.includes("email");
 }
 
 async function verifyCurrentPassword(context: AuthContext, password: string) {
@@ -289,7 +335,7 @@ function buildDeletionOtpMessage(
         "",
         `このコードは ${OTP_TTL_MINUTES} 分間有効です。`,
         "このコードを入力しても、30日間の削除猶予期間が始まるだけです。",
-        "心当たりがない場合はパスワードを変更してください。",
+        "心当たりがない場合はアカウントのセキュリティ設定を確認してください。",
       ].join("\n"),
       html: `
         <p>TypingNote のアカウント削除確認コードです。</p>
@@ -297,7 +343,7 @@ function buildDeletionOtpMessage(
         <p>確認コード: <strong style="font-size:20px;letter-spacing:.12em">${otp}</strong></p>
         <p>このコードは ${OTP_TTL_MINUTES} 分間有効です。</p>
         <p>このコードを入力しても、30日間の削除猶予期間が始まるだけです。</p>
-        <p>心当たりがない場合はパスワードを変更してください。</p>
+        <p>心当たりがない場合はアカウントのセキュリティ設定を確認してください。</p>
       `,
     };
   }
@@ -312,7 +358,7 @@ function buildDeletionOtpMessage(
       "",
       `This code is valid for ${OTP_TTL_MINUTES} minutes.`,
       "Confirming it only starts the 30-day recovery period.",
-      "If you did not request this, change your password.",
+      "If you did not request this, review your account security settings.",
     ].join("\n"),
     html: `
       <p>This is your TypingNote account deletion verification code.</p>
@@ -320,7 +366,7 @@ function buildDeletionOtpMessage(
       <p>Verification code: <strong style="font-size:20px;letter-spacing:.12em">${otp}</strong></p>
       <p>This code is valid for ${OTP_TTL_MINUTES} minutes.</p>
       <p>Confirming it only starts the 30-day recovery period.</p>
-      <p>If you did not request this, change your password.</p>
+      <p>If you did not request this, review your account security settings.</p>
     `,
   };
 }
@@ -465,9 +511,12 @@ async function sendRecoveryCode(args: {
 async function startDeletion(req: Request, body: RequestBody) {
   const context = await getAuthenticatedContext(req);
   const locale = normalizeLocale(body.resolvedLocale);
-  await verifyCurrentPassword(context, String(body.password ?? ""));
-
   const admin = createAdminClient();
+
+  if (await userRequiresPasswordForDeletion(admin, context.userId)) {
+    await verifyCurrentPassword(context, String(body.password ?? ""));
+  }
+
   const { data: existing, error: existingError } = await admin
     .from("account_deletion_requests")
     .select("status,scheduled_deletion_at")

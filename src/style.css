@@ -908,6 +908,25 @@ body {
   font-size: 13px;
 }
 
+.auth-provider-actions{
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.auth-btn-provider{
+  width: 100%;
+  background: #fff;
+  color: #111;
+  font-weight: 600;
+  text-align: center;
+}
+
+.auth-btn-provider:hover{
+  background: #f6f7f9;
+  border-color: #c8d0d9;
+}
+
 .auth-btn-secondary{
   flex: 1;
   background: #fff;

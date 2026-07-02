@@ -46,7 +46,12 @@ export type PendingSignUpDraft = {
   resolvedLocale: ResolvedLocale;
 };
 
-function buildUserMetadata(draft: PendingSignUpDraft) {
+type ProfileDraft = BeginSignUpDraft;
+
+export type OAuthProvider = "google" | "apple";
+export type PendingOAuthSignUpDraft = Omit<BeginSignUpDraft, "email">;
+
+function buildUserMetadata(draft: ProfileDraft) {
   return {
     display_name: draft.displayName,
     family_name: draft.familyName || null,
@@ -60,7 +65,7 @@ function buildUserMetadata(draft: PendingSignUpDraft) {
   };
 }
 
-function buildProfilePayload(userId: string, draft: PendingSignUpDraft) {
+function buildProfilePayload(userId: string, draft: ProfileDraft) {
   return {
     id: userId,
     email: draft.email,
@@ -116,8 +121,47 @@ export async function completeProfileAfterOtp(draft: PendingSignUpDraft) {
   return updatedUserData.user ?? user;
 }
 
+export async function completeProfileAfterOAuth(draft: BeginSignUpDraft) {
+  const user = await getUser();
+  if (!user) throw new Error("User is not signed in");
+
+  const userMetadata = {
+    ...(user.user_metadata ?? {}),
+    ...buildUserMetadata(draft),
+  };
+
+  const { data: updatedUserData, error: updateUserError } = await supabase.auth.updateUser({
+    data: userMetadata,
+  });
+
+  if (updateUserError) throw updateUserError;
+
+  const { error: profileError } = await supabase.from("profiles").upsert(
+    buildProfilePayload(user.id, draft),
+    { onConflict: "id" }
+  );
+
+  if (profileError) throw profileError;
+
+  return updatedUserData.user ?? user;
+}
+
 export async function signIn(email: string, password: string) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+export async function signInWithOAuthProvider(
+  provider: OAuthProvider,
+  redirectTo: string
+) {
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo,
+    },
+  });
   if (error) throw error;
   return data;
 }
@@ -147,6 +191,82 @@ export async function getUser() {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
   return data.user; // null or User
+}
+
+export type ProfileCompletion = {
+  display_name: string | null;
+  agreed_terms_at: string | null;
+  terms_version: string | null;
+  agreed_privacy_at: string | null;
+  privacy_version: string | null;
+};
+
+export function isProfileComplete(profile: ProfileCompletion | null): boolean {
+  return Boolean(
+    profile?.display_name?.trim() &&
+      profile.agreed_terms_at &&
+      profile.terms_version &&
+      profile.agreed_privacy_at &&
+      profile.privacy_version
+  );
+}
+
+export async function getProfileCompletion(
+  userId: string
+): Promise<ProfileCompletion | null> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select(
+      "display_name,agreed_terms_at,terms_version,agreed_privacy_at,privacy_version"
+    )
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as ProfileCompletion | null;
+}
+
+function collectAuthProviderIds(user: unknown): string[] {
+  const providerIds = new Set<string>();
+  const record = user as {
+    app_metadata?: {
+      provider?: unknown;
+      providers?: unknown;
+    };
+    identities?: Array<{ provider?: unknown }>;
+  } | null;
+
+  const primaryProvider = record?.app_metadata?.provider;
+  if (typeof primaryProvider === "string" && primaryProvider) {
+    providerIds.add(primaryProvider);
+  }
+
+  const providers = record?.app_metadata?.providers;
+  if (Array.isArray(providers)) {
+    providers.forEach((provider) => {
+      if (typeof provider === "string" && provider) providerIds.add(provider);
+    });
+  }
+
+  record?.identities?.forEach((identity) => {
+    if (typeof identity.provider === "string" && identity.provider) {
+      providerIds.add(identity.provider);
+    }
+  });
+
+  return [...providerIds];
+}
+
+export function userRequiresPasswordForDeletion(user: unknown): boolean {
+  const providers = collectAuthProviderIds(user);
+  if (providers.length === 0) return true;
+  return providers.includes("email");
+}
+
+export async function currentUserRequiresPasswordForDeletion(): Promise<boolean> {
+  const user = await getUser();
+  if (!user) return true;
+  return userRequiresPasswordForDeletion(user);
 }
 
 export type ProfileLocale = {
@@ -572,12 +692,12 @@ export type ConfirmAccountDeletionResult = {
 };
 
 export async function startAccountDeletion(args: {
-  password: string;
+  password?: string;
   resolvedLocale?: ResolvedLocale;
 }): Promise<StartAccountDeletionResult> {
   return invokeAccountDeletion<StartAccountDeletionResult>({
     action: "start_deletion",
-    password: args.password,
+    password: args.password ?? "",
     resolvedLocale: args.resolvedLocale,
   });
 }

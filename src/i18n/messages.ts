@@ -2,6 +2,10 @@ import type { ResolvedLocale } from "./language";
 
 const ja = {
   createAccount: "アカウント作成",
+  oauthSignInWithGoogle: "Google で Sign in",
+  oauthSignInWithApple: "Apple で Sign in",
+  oauthSignUpWithGoogle: "Google でアカウント作成",
+  oauthSignUpWithApple: "Apple でアカウント作成",
 
   authHelp:
     "既存アカウントで Sign in してください。\nアカウント未作成ならアカウント作成から進めます。",
@@ -104,9 +108,16 @@ const ja = {
       "現在のパスワードとは異なる新しいパスワードを設定してください。",
     msgAuthWeakPassword:
       "パスワードの条件を満たしていません。別のパスワードを設定してください。",
-    msgAuthInvalidEmail: "メールアドレスの形式が正しくありません。",
+  msgAuthInvalidEmail: "メールアドレスの形式が正しくありません。",
+  msgOAuthStarting: "外部アカウント認証へ進みます...",
+  msgOAuthSignupDraftMissing:
+    "アカウント作成情報が見つかりません。アカウント作成画面からやり直してください。",
+  msgOAuthSignupEmailMissing:
+    "外部アカウントからメールアドレスを取得できませんでした。別の方法でアカウント作成してください。",
+  msgOAuthAccountRequiresSignup:
+    "この外部アカウントはまだ TypingNote のアカウント作成が完了していません。アカウント作成画面から進めてください。",
 
-    msgSaveRequiresAccount: "保存にはアカウント作成または Sign in が必要です。",
+  msgSaveRequiresAccount: "保存にはアカウント作成または Sign in が必要です。",
     msgExplorerRequiresSignIn: "Explorer を使うには Sign in が必要です。",
     msgDustRequiresSignIn: "Dust を使うには Sign in が必要です。",
     confirmTitle: "確認",
@@ -181,9 +192,12 @@ const ja = {
     accountDeletionTitle: "アカウント削除",
     accountDeletionNote:
       "現在のパスワードとログインメールに届く確認コードを確認した後、30日間の削除猶予期間が始まります。猶予期間中は利用できませんが、メールで届く復元コードで取り消せます。",
+    accountDeletionNoteOtpOnly:
+      "ログインメールに届く確認コードを確認した後、30日間の削除猶予期間が始まります。猶予期間中は利用できませんが、メールで届く復元コードで取り消せます。",
     accountDeletionPasswordLabel: "現在のパスワード",
     accountDeletionStart: "削除確認コードを送信",
     accountDeletionStarting: "パスワードを確認し、確認コードを送信しています...",
+    accountDeletionStartingOtpOnly: "削除確認コードを送信しています...",
     accountDeletionOtpSent: "削除確認コードを送信しました。",
     accountDeletionConfirm: "30日後の削除を予約",
     accountDeletionConfirmPrompt:
@@ -262,6 +276,10 @@ const ja = {
 
 const en: Record<keyof typeof ja, string> = {
   createAccount: "Create account",
+  oauthSignInWithGoogle: "Sign in with Google",
+  oauthSignInWithApple: "Sign in with Apple",
+  oauthSignUpWithGoogle: "Create account with Google",
+  oauthSignUpWithApple: "Create account with Apple",
 
   authHelp:
     "Sign in with your existing account.\nIf you do not have an account yet, create one first.",
@@ -363,6 +381,13 @@ const en: Record<keyof typeof ja, string> = {
     msgAuthWeakPassword:
       "Password does not meet the requirements. Please choose another password.",
     msgAuthInvalidEmail: "Invalid email address.",
+    msgOAuthStarting: "Continuing to external account authentication...",
+    msgOAuthSignupDraftMissing:
+      "Account creation information was not found. Please start again from the account form.",
+    msgOAuthSignupEmailMissing:
+      "We could not get an email address from the external account. Please create an account another way.",
+    msgOAuthAccountRequiresSignup:
+      "This external account has not finished creating a TypingNote account yet. Please continue from Create account.",
 
     msgSaveRequiresAccount: "You need to create an account or Sign in to save.",
     msgExplorerRequiresSignIn: "You need to Sign in to use Explorer.",
@@ -439,9 +464,12 @@ const en: Record<keyof typeof ja, string> = {
     accountDeletionTitle: "Delete account",
     accountDeletionNote:
       "After confirming your current password and a code sent to your login email, a 30-day recovery period begins. The account cannot be used during that period, but the recovery code sent by email can cancel deletion.",
+    accountDeletionNoteOtpOnly:
+      "After confirming a code sent to your login email, a 30-day recovery period begins. The account cannot be used during that period, but the recovery code sent by email can cancel deletion.",
     accountDeletionPasswordLabel: "Current password",
     accountDeletionStart: "Send deletion verification code",
     accountDeletionStarting: "Checking your password and sending a verification code...",
+    accountDeletionStartingOtpOnly: "Sending a deletion verification code...",
     accountDeletionOtpSent: "Account deletion verification code sent.",
     accountDeletionConfirm: "Schedule deletion in 30 days",
     accountDeletionConfirmPrompt:

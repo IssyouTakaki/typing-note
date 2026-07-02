@@ -138,15 +138,17 @@
 
             <div id="accountDeletionMsg" class="auth-msg" hidden></div>
 
-            <label id="accountDeletionPasswordLabel" class="auth-label" for="accountDeletionPasswordInput">
-                現在のパスワード
-            </label>
-            <input
-                id="accountDeletionPasswordInput"
-                class="auth-input"
-                type="password"
-                autocomplete="current-password"
-            />
+            <div id="accountDeletionPasswordArea">
+                <label id="accountDeletionPasswordLabel" class="auth-label" for="accountDeletionPasswordInput">
+                    現在のパスワード
+                </label>
+                <input
+                    id="accountDeletionPasswordInput"
+                    class="auth-input"
+                    type="password"
+                    autocomplete="current-password"
+                />
+            </div>
 
             <button id="startAccountDeletionBtn" class="auth-btn auth-btn-danger account-full-btn" type="button">
                 削除確認コードを送信
