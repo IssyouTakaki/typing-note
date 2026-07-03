@@ -567,6 +567,7 @@ let explorerMoveSelectHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
 let explorerOpenFocusHandler: (() => Promise<void>) | null = null;
 let dustSelectToggleHandler: (() => Promise<void>) | null = null;
 let dustMoveFocusHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
+let dustMoveSelectHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
 let dustOpenFocusHandler: (() => Promise<void>) | null = null;
 
 let teardownPanesResize: (() => void) | null = null;
@@ -1061,6 +1062,8 @@ function registerSaveShortcut() {
         e.preventDefault();
         if (state.view === "explorer" && explorerMoveSelectHandler) {
           void explorerMoveSelectHandler(selectMoveDelta);
+        } else if (state.view === "dust" && dustMoveSelectHandler) {
+          void dustMoveSelectHandler(selectMoveDelta);
         }
         return;
       }
@@ -2495,6 +2498,16 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     if (state.view !== "dust") return;
     state.dustFocusId = moveFocus(dustOrderedIds, state.dustFocusId, delta);
     syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
+    scrollFocusIntoView(dustList, state.dustFocusId);
+  };
+
+  const moveDustFocusAndSelect = (delta: -1 | 1) => {
+    if (state.view !== "dust") return;
+    ensureDustFocus();
+    state.dustFocusId = moveFocus(dustOrderedIds, state.dustFocusId, delta);
+    if (state.dustFocusId) state.dustSelectedIds.add(state.dustFocusId);
+    syncListClasses(dustList, state.dustFocusId, state.dustSelectedIds);
+    updateDustStateText();
     scrollFocusIntoView(dustList, state.dustFocusId);
   };
 
@@ -4010,6 +4023,11 @@ input.addEventListener("copy", (e) => {
     ensureDustFocus();
     moveDustFocus(delta);
   };
+
+  dustMoveSelectHandler = async (delta: -1 | 1) => {
+    if (state.view !== "dust") return;
+    moveDustFocusAndSelect(delta);
+  };
   
   dustOpenFocusHandler = async () => {
     if (state.view !== "dust") return;
@@ -4476,6 +4494,7 @@ export function resetMemoScreenHandlers() {
   exportDataHandler = null;
   saveMemoViewportBeforeScreenChangeHandler = null;
   explorerMoveSelectHandler = null;
+  dustMoveSelectHandler = null;
   listSelectSpaceHeld = false;
 
   teardownFeedbackDialog?.();
