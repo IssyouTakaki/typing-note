@@ -31,6 +31,20 @@ export function isSaveShortcut(e: KeyboardEvent) {
     const hasMod = isMac ? e.metaKey : e.ctrlKey;
     return e.altKey && e.shiftKey && hasMod;
   }
+
+  export function getListSelectMoveShortcutDelta(
+    e: KeyboardEvent,
+    isSpaceHeld: boolean
+  ): -1 | 1 | null {
+    if (!isSpaceHeld) return null;
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return null;
+
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    const hasMod = isMac ? e.metaKey : e.ctrlKey;
+    if (!e.altKey || !e.shiftKey || !hasMod) return null;
+
+    return e.key === "ArrowUp" ? -1 : 1;
+  }
   
   export function isNewShortcut(e:KeyboardEvent) {
     const keyRow = e.key;

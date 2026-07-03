@@ -21,6 +21,7 @@ import {
   isSaveShortcut,
   isExplorerSortShortcut,
   isListSelectToggleShortcut,
+  getListSelectMoveShortcutDelta,
   isNewShortcut,
   isDeleteShortcut,
   isCloseShortcut,
@@ -139,6 +140,7 @@ Mac では Ctrl を ⌘、Alt を Option と読み替えてください。
 - Arrow Up / Arrow Down = Move focused memo
   - Search box 入力中は検索文字の移動を優先します。
 - Alt + Shift + Ctrl/⌘ + Space = Toggle selection of focused memo
+- Hold Alt + Shift + Ctrl/⌘ + Space, then press Arrow Up / Arrow Down = Select the memo above / below
 - Enter = Open focused memo when no memo is selected
   - Explorer: open the memo.
   - Dust: confirm restore, then open the memo.
@@ -535,6 +537,7 @@ function extractFirstLineTitle(text: string, maxLen: number) {
 }
 
 let saveShortcutRegistered = false;
+let listSelectSpaceHeld = false;
 
 let goExplorerHandler: (() => Promise<void>) | null = null;
 let goDustHandler: (() => Promise<void>) | null = null;
@@ -560,6 +563,7 @@ let saveMemoViewportBeforeScreenChangeHandler: (() => void) | null = null;
 // --- List focus / multi-select (Explorer & Dust) ---
 let explorerSelectToggleHandler: (() => Promise<void>) | null = null;
 let explorerMoveFocusHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
+let explorerMoveSelectHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
 let explorerOpenFocusHandler: (() => Promise<void>) | null = null;
 let dustSelectToggleHandler: (() => Promise<void>) | null = null;
 let dustMoveFocusHandler: ((delta: -1 | 1) => Promise<void>) | null = null;
@@ -1041,10 +1045,22 @@ function registerSaveShortcut() {
     if (state.view === "explorer" || state.view === "dust") {
       if (isListSelectToggleShortcut(e)) {
         e.preventDefault();
+        listSelectSpaceHeld = true;
+        if (e.repeat) return;
+
         if (state.view === "explorer") {
           if (explorerSelectToggleHandler) void explorerSelectToggleHandler();
         } else {
           if (dustSelectToggleHandler) void dustSelectToggleHandler();
+        }
+        return;
+      }
+
+      const selectMoveDelta = getListSelectMoveShortcutDelta(e, listSelectSpaceHeld);
+      if (selectMoveDelta !== null) {
+        e.preventDefault();
+        if (state.view === "explorer" && explorerMoveSelectHandler) {
+          void explorerMoveSelectHandler(selectMoveDelta);
         }
         return;
       }
@@ -1140,7 +1156,20 @@ function registerSaveShortcut() {
     }
   };
 
+  const keyupHandler = (e: KeyboardEvent) => {
+    const isSpace = e.key === " " || e.key === "Space" || e.code === "Space";
+    if (isSpace || e.key === "Alt" || e.key === "Shift" || e.key === "Control" || e.key === "Meta") {
+      listSelectSpaceHeld = false;
+    }
+  };
+
+  const clearListSelectSpaceHeld = () => {
+    listSelectSpaceHeld = false;
+  };
+
   window.addEventListener("keydown", handler, { passive: false });
+  window.addEventListener("keyup", keyupHandler, { passive: true });
+  window.addEventListener("blur", clearListSelectSpaceHeld);
 }
 
 export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
@@ -2449,6 +2478,16 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     if (state.view !== "explorer") return;
     state.explorerFocusId = moveFocus(explorerOrderedIds, state.explorerFocusId, delta);
     syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
+    scrollFocusIntoView(memoList, state.explorerFocusId);
+  };
+
+  const moveExplorerFocusAndSelect = (delta: -1 | 1) => {
+    if (state.view !== "explorer") return;
+    ensureExplorerFocus();
+    state.explorerFocusId = moveFocus(explorerOrderedIds, state.explorerFocusId, delta);
+    if (state.explorerFocusId) state.explorerSelectedIds.add(state.explorerFocusId);
+    syncListClasses(memoList, state.explorerFocusId, state.explorerSelectedIds);
+    updateExplorerStateText();
     scrollFocusIntoView(memoList, state.explorerFocusId);
   };
 
@@ -3943,6 +3982,11 @@ input.addEventListener("copy", (e) => {
     moveExplorerFocus(delta);
   };
 
+  explorerMoveSelectHandler = async (delta: -1 | 1) => {
+    if (state.view !== "explorer") return;
+    moveExplorerFocusAndSelect(delta);
+  };
+
   explorerOpenFocusHandler = async () => {
     if (state.view !== "explorer") return;
     ensureExplorerFocus();
@@ -4431,6 +4475,8 @@ export function resetMemoScreenHandlers() {
   openFeedbackDialogHandler = null;
   exportDataHandler = null;
   saveMemoViewportBeforeScreenChangeHandler = null;
+  explorerMoveSelectHandler = null;
+  listSelectSpaceHeld = false;
 
   teardownFeedbackDialog?.();
   teardownFeedbackDialog = null;
