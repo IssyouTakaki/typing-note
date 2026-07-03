@@ -31,6 +31,7 @@ import {
   isHeadingPopupShortcut,
   isAccountSettingsShortcut,
   isFeedbackShortcut,
+  isExportShortcut,
   getShortcutDigit,
 } from "../../shortcuts/shortcutPredicates";
 import { getLineStartIndex, registerTextareaEditing } from "../../editor/textareaEditing";
@@ -116,6 +117,10 @@ Mac では Ctrl を ⌘、Alt を Option と読み替えてください。
 ## Account
 
 - Alt + Shift + Ctrl/Cmd + A = Open account settings
+
+## Export
+
+- Alt + Shift + Ctrl/Cmd + X = Export current memo or selected Explorer memo(s) as Markdown ZIP
 
 ## Delete / Dust actions
 
@@ -272,6 +277,226 @@ function formatBytes(bytes: number): string {
   return `${gb.toFixed(1)} GB`;
 }
 
+type MarkdownZipFile = {
+  path: string;
+  content: string;
+  modifiedAt?: Date;
+};
+
+let crc32Table: Uint32Array | null = null;
+
+function getCrc32Table(): Uint32Array {
+  if (crc32Table) return crc32Table;
+
+  const table = new Uint32Array(256);
+  for (let i = 0; i < table.length; i++) {
+    let c = i;
+    for (let bit = 0; bit < 8; bit++) {
+      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c >>> 0;
+  }
+
+  crc32Table = table;
+  return table;
+}
+
+function crc32(bytes: Uint8Array): number {
+  const table = getCrc32Table();
+  let crc = 0xffffffff;
+
+  for (const byte of bytes) {
+    crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function toDosDateTime(date: Date): { date: number; time: number } {
+  const year = Math.min(2107, Math.max(1980, date.getFullYear()));
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hour = date.getHours();
+  const minute = date.getMinutes();
+  const second = Math.floor(date.getSeconds() / 2);
+
+  return {
+    date: ((year - 1980) << 9) | (month << 5) | day,
+    time: (hour << 11) | (minute << 5) | second,
+  };
+}
+
+function concatUint8Arrays(parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+
+  return out;
+}
+
+function createMarkdownZip(files: MarkdownZipFile[]): Blob {
+  const encoder = new TextEncoder();
+  const localParts: Uint8Array[] = [];
+  const centralParts: Uint8Array[] = [];
+  let localOffset = 0;
+
+  if (files.length > 0xffff) {
+    throw new Error("too many files for zip export");
+  }
+
+  for (const file of files) {
+    const nameBytes = encoder.encode(file.path);
+    const contentBytes = encoder.encode(file.content);
+    const size = contentBytes.length;
+
+    if (nameBytes.length > 0xffff) {
+      throw new Error("zip file name is too long");
+    }
+
+    if (size > 0xffffffff) {
+      throw new Error("zip file is too large");
+    }
+
+    const crc = crc32(contentBytes);
+    const { date, time } = toDosDateTime(file.modifiedAt ?? new Date());
+
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const localView = new DataView(localHeader.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0x0800, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint16(10, time, true);
+    localView.setUint16(12, date, true);
+    localView.setUint32(14, crc, true);
+    localView.setUint32(18, size, true);
+    localView.setUint32(22, size, true);
+    localView.setUint16(26, nameBytes.length, true);
+    localView.setUint16(28, 0, true);
+    localHeader.set(nameBytes, 30);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const centralView = new DataView(centralHeader.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0x0800, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint16(12, time, true);
+    centralView.setUint16(14, date, true);
+    centralView.setUint32(16, crc, true);
+    centralView.setUint32(20, size, true);
+    centralView.setUint32(24, size, true);
+    centralView.setUint16(28, nameBytes.length, true);
+    centralView.setUint16(30, 0, true);
+    centralView.setUint16(32, 0, true);
+    centralView.setUint16(34, 0, true);
+    centralView.setUint16(36, 0, true);
+    centralView.setUint32(38, 0, true);
+    centralView.setUint32(42, localOffset, true);
+    centralHeader.set(nameBytes, 46);
+
+    localParts.push(localHeader, contentBytes);
+    centralParts.push(centralHeader);
+    localOffset += localHeader.length + contentBytes.length;
+  }
+
+  const centralDirectory = concatUint8Arrays(centralParts);
+  const end = new Uint8Array(22);
+  const endView = new DataView(end.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(4, 0, true);
+  endView.setUint16(6, 0, true);
+  endView.setUint16(8, files.length, true);
+  endView.setUint16(10, files.length, true);
+  endView.setUint32(12, centralDirectory.length, true);
+  endView.setUint32(16, localOffset, true);
+  endView.setUint16(20, 0, true);
+
+  const zipBytes = concatUint8Arrays([...localParts, centralDirectory, end]);
+  const zipBuffer = new ArrayBuffer(zipBytes.byteLength);
+  new Uint8Array(zipBuffer).set(zipBytes);
+  return new Blob([zipBuffer], { type: "application/zip" });
+}
+
+function formatCompactTimestamp(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  const second = String(date.getSeconds()).padStart(2, "0");
+  return `${y}${m}${day}-${hour}${minute}${second}`;
+}
+
+const WINDOWS_RESERVED_FILE_NAMES = new Set([
+  "CON",
+  "PRN",
+  "AUX",
+  "NUL",
+  "COM1",
+  "COM2",
+  "COM3",
+  "COM4",
+  "COM5",
+  "COM6",
+  "COM7",
+  "COM8",
+  "COM9",
+  "LPT1",
+  "LPT2",
+  "LPT3",
+  "LPT4",
+  "LPT5",
+  "LPT6",
+  "LPT7",
+  "LPT8",
+  "LPT9",
+]);
+
+function sanitizeMarkdownFileBase(input: string): string {
+  const normalized = input
+    .normalize("NFKC")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "");
+
+  const base = normalized.slice(0, 80) || "memo";
+  return WINDOWS_RESERVED_FILE_NAMES.has(base.toUpperCase()) ? `_${base}` : base;
+}
+
+function uniqueMarkdownPath(base: string, used: Set<string>): string {
+  const cleanBase = sanitizeMarkdownFileBase(base);
+  let path = `${cleanBase}.md`;
+  let suffix = 2;
+
+  while (used.has(path.toLowerCase())) {
+    path = `${cleanBase}-${suffix}.md`;
+    suffix++;
+  }
+
+  used.add(path.toLowerCase());
+  return path;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function extractPseudoTags(text: string): string[] {
   // Pseudo tags: "#aiueo" (no space after #)
   // - Exclude headings "# title" (space after #)
@@ -329,6 +554,7 @@ let renderTabsHandler: (() => void) | null = null;
 let openHeadingListPopupHandler: (() => Promise<void>) | null = null;
 let openSearchHandler: (() => Promise<void>) | null = null;
 let openFeedbackDialogHandler: (() => Promise<void>) | null = null;
+let exportDataHandler: (() => Promise<void>) | null = null;
 let saveMemoViewportBeforeScreenChangeHandler: (() => void) | null = null;
 
 // --- List focus / multi-select (Explorer & Dust) ---
@@ -802,6 +1028,12 @@ function registerSaveShortcut() {
       if (openFeedbackDialogHandler) {
         void openFeedbackDialogHandler();
       }
+      return;
+    }
+
+    if (isExportShortcut(e)) {
+      e.preventDefault();
+      if (exportDataHandler) void exportDataHandler();
       return;
     }
      
@@ -2245,6 +2477,129 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     scrollFocusIntoView(dustList, state.dustFocusId);
   };
 
+  type MarkdownExportSource = {
+    content: string;
+    title: string;
+    modifiedAt?: Date;
+  };
+
+  const dateFromMemo = (memo: Pick<MemoRow, "created_at" | "updated_at">): Date => {
+    const raw = memo.updated_at ?? memo.created_at;
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? new Date() : date;
+  };
+
+  const buildMarkdownZipFiles = (sources: MarkdownExportSource[]): MarkdownZipFile[] => {
+    const used = new Set<string>();
+    const width = sources.length > 1 ? Math.max(2, String(sources.length).length) : 0;
+
+    return sources.map((source, index) => {
+      const prefix = width > 0 ? `${String(index + 1).padStart(width, "0")}-` : "";
+      return {
+        path: uniqueMarkdownPath(`${prefix}${source.title}`, used),
+        content: source.content,
+        modifiedAt: source.modifiedAt,
+      };
+    });
+  };
+
+  const downloadMarkdownSourcesAsZip = (
+    sources: MarkdownExportSource[],
+    scope: "active" | "selected"
+  ) => {
+    const files = buildMarkdownZipFiles(sources);
+    const zip = createMarkdownZip(files);
+    const timestamp = formatCompactTimestamp();
+    downloadBlob(zip, `typingnote-${scope}-${timestamp}.zip`);
+
+    const label = files.length === 1 ? "memo" : "memos";
+    showMessage(`Exported ${files.length} ${label} as Markdown ZIP.`);
+  };
+
+  const getSelectedExplorerIdsInOrder = (): string[] => {
+    const selected = new Set(state.explorerSelectedIds);
+    const ordered = explorerOrderedIds.filter((id) => selected.has(id));
+    const orderedSet = new Set(ordered);
+    const remaining = Array.from(selected).filter((id) => !orderedSet.has(id));
+    return [...ordered, ...remaining];
+  };
+
+  const exportActiveMemoAsMarkdownZip = async () => {
+    const tab = activeTab();
+
+    if (tab.mode !== "editor") {
+      showMessage("Export is available in Editor or selected Explorer memos.");
+      return;
+    }
+
+    downloadMarkdownSourcesAsZip(
+      [{
+        content: tab.text,
+        title: memoTitleFromContent(tab.text),
+        modifiedAt: new Date(),
+      }],
+      "active"
+    );
+  };
+
+  const exportSelectedExplorerMemosAsMarkdownZip = async () => {
+    const ids = getSelectedExplorerIdsInOrder();
+
+    if (ids.length === 0) {
+      showMessage("Select memo(s) with Alt+Shift+Ctrl+Space before exporting.");
+      return;
+    }
+
+    showMessage(`Exporting ${ids.length} memo${ids.length === 1 ? "" : "s"}...`);
+
+    const userId = await requireUserId();
+    const sources: MarkdownExportSource[] = [];
+
+    for (const id of ids) {
+      const cached =
+        explorerAllSorted.find((memo) => memo.id === id) ??
+        state.memos.find((memo) => memo.id === id) ??
+        null;
+      const memo = cached ?? await getMemo({ userId, id });
+
+      if (!memo) continue;
+
+      const openTab = findOpenMemoTab(id);
+      const content = openTab?.text ?? memo.content;
+      sources.push({
+        content,
+        title: memoTitleFromContent(content),
+        modifiedAt: dateFromMemo(memo),
+      });
+    }
+
+    if (sources.length === 0) {
+      showMessage("No selected memos could be exported. Reload Explorer and try again.");
+      return;
+    }
+
+    downloadMarkdownSourcesAsZip(sources, "selected");
+  };
+
+  const exportCurrentContextAsMarkdownZip = async () => {
+    try {
+      if (state.view === "editor") {
+        await exportActiveMemoAsMarkdownZip();
+        return;
+      }
+
+      if (state.view === "explorer") {
+        await exportSelectedExplorerMemosAsMarkdownZip();
+        return;
+      }
+
+      showMessage("Export is currently available in Editor or Explorer.");
+    } catch (error) {
+      console.error("export failed", error);
+      showMessage("Oops - export failed. Please try again.", 3500);
+    }
+  };
+
 
 // --- tab UX helpers (shortcut switching etc.)
   // --- tab UX helpers (shortcut switching etc.)
@@ -3574,6 +3929,7 @@ input.addEventListener("copy", (e) => {
 
   goExplorerHandler = openExplorerTabByShortcut;
   goDustHandler = openDustTabByShortcut;
+  exportDataHandler = exportCurrentContextAsMarkdownZip;
   
   // keyboard handlers for list focus / selection / open
   explorerSelectToggleHandler = async () => {
@@ -4073,6 +4429,7 @@ export function resetMemoScreenHandlers() {
   openHeadingListPopupHandler = null;
   openSearchHandler = null;
   openFeedbackDialogHandler = null;
+  exportDataHandler = null;
   saveMemoViewportBeforeScreenChangeHandler = null;
 
   teardownFeedbackDialog?.();
