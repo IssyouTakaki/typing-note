@@ -143,6 +143,17 @@ export function isSaveShortcut(e: KeyboardEvent) {
 
     return e.altKey && e.shiftKey && hasMod;
   }
+
+  export function isExportShortcut(e: KeyboardEvent) {
+    const keyRow = e.key;
+    if (typeof keyRow !== "string") return false;
+    if (keyRow.toLowerCase() !== "x") return false;
+
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    const hasMod = isMac ? e.metaKey : e.ctrlKey;
+
+    return e.altKey && e.shiftKey && hasMod;
+  }
   
   export function getShortcutDigit(e: KeyboardEvent): number | null {
     const isMac = navigator.platform.toLowerCase().includes("mac");
