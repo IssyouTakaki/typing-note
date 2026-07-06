@@ -2437,6 +2437,22 @@ export function mountMemoUI(app: HTMLDivElement, deps: MountMemoUIDeps) {
     const esc = (globalThis as any).CSS?.escape ? (globalThis as any).CSS.escape(focusId) : focusId;
     const el = ul.querySelector<HTMLLIElement>(`li.memo-item[data-id="${esc}"]`);
     if (!el) return;
+
+    const stickyBottom =
+      document.querySelector<HTMLElement>(".app-top")?.getBoundingClientRect().bottom ?? 0;
+    const margin = 8;
+    const rect = el.getBoundingClientRect();
+
+    if (rect.top < stickyBottom + margin) {
+      window.scrollBy({ top: rect.top - stickyBottom - margin, behavior });
+      return;
+    }
+
+    if (rect.bottom > window.innerHeight - margin) {
+      window.scrollBy({ top: rect.bottom - window.innerHeight + margin, behavior });
+      return;
+    }
+
     el.scrollIntoView({ behavior, block: "nearest" });
   };
 
